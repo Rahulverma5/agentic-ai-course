@@ -1149,14 +1149,16 @@ flowchart LR
 
 📖 Deep dive: 📘⭐ [MCP — Introduction](https://modelcontextprotocol.io/docs/getting-started/intro) · 🧑‍💻⭐ [DeepLearning.AI × Anthropic — MCP: Build Rich-Context AI Apps (free short course)](https://www.deeplearning.ai/short-courses/mcp-build-rich-context-ai-apps-with-anthropic/)
 
-### 8.2 Build a server (FastMCP, official Python SDK)
+### 8.2 Build a server (official Python SDK, `mcp` 2.x)
+
+> In `mcp` 2.x the server class formerly called `FastMCP` is named **`MCPServer`**, and attributes are snake_case (`input_schema`, `is_error`). Older tutorials use the 1.x names.
 
 ```python
 # orders_server.py
 import sqlite3
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-mcp = FastMCP("shopease-orders")
+mcp = MCPServer("shopease-orders")
 DB = "shopease/data/shopease.db"
 
 @mcp.tool()
@@ -1179,23 +1181,20 @@ Function name, type hints and docstring become the tool's name, schema and descr
 ### 8.3 Connect MCP tools to *your* agent loop
 
 ```python
-import asyncio
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+import asyncio, sys
+from mcp import Client, StdioServerParameters
 
 async def main():
-    params = StdioServerParameters(command="python", args=["orders_server.py"])
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            listed = await session.list_tools()
-            claude_tools = [{"name": t.name, "description": t.description, "input_schema": t.inputSchema}
-                            for t in listed.tools]                       # MCP → Claude tool format
-            result = await session.call_tool("get_order", {"order_id": "O1007"})
-            print(claude_tools[0]["name"], "→", result.content[0].text)
-            # In run_agent: when the model calls a tool, route it to session.call_tool(...)
+    params = StdioServerParameters(command=sys.executable, args=["orders_server.py"])
+    async with Client(params) as mcp_client:                     # starts the server and handshakes
+        listed = await mcp_client.list_tools()
+        claude_tools = [{"name": t.name, "description": t.description, "input_schema": t.input_schema}
+                        for t in listed.tools]                       # MCP → Claude tool format
+        result = await mcp_client.call_tool("get_order", {"order_id": "O1007"})
+        print(claude_tools[0]["name"], "→", result.content[0].text, "| error:", result.is_error)
+        # In run_agent: when the model calls a tool, route it to mcp_client.call_tool(...)
 
-asyncio.run(main())   # in Colab/Jupyter use: await main()
+asyncio.run(main())   # in Jupyter use: await main()
 ```
 
 The Claude API also has an **MCP connector**: pass a remote server URL and the API calls the tools for you, with no client code. It's convenient for public HTTP servers. The local client gives you full control (logging, approvals) and works with stdio servers.

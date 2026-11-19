@@ -1,0 +1,7 @@
+# Day 14 only: agent frameworks. Install when you reach Day 14:
+#   pip install -r requirements-frameworks.txt
+# Frameworks change fast. If an import fails, check the framework's quickstart and pin a version.
+langgraph
+langchain-anthropic
+openai-agents[litellm]
+claude-agent-sdk
