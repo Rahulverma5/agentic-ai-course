@@ -1,0 +1,4 @@
+- buy groceries (low)
+- finish Agentic AI stage 2 (high)
+- call the bank about card (medium)
+- read the "Building Effective Agents" article (high)

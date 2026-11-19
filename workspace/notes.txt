@@ -1,0 +1,2 @@
+Agent = LLM + tools + loop + context.
+The model never runs tools itself; my code does.
