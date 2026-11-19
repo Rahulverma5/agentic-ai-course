@@ -55,6 +55,7 @@ Each theory note starts with **short videos** (mostly 5–20 min), then explains
 
 ## Projects & case studies
 - **[ShopEase Support Agent](projects/shopease-support-agent/)**: a working reference capstone with 16 tests (`python -m pytest`, no key needed) and a 20-case eval suite.
+- **[Claude Code, inside out](case-studies/claude-code/README.md)**: a 4-part deep guide to Claude Code + Opus 5.5 (models, loop, tools, subagents, context, memory, hooks, MCP, guardrails, `/btw`, compaction, and a usage playbook).
 - **[Case studies](case-studies/)**: Anthropic's multi-agent research system, Cognition's single-threaded agents, the Claude Code loop, Contextual Retrieval, code execution with MCP, long-running harnesses, τ-bench, prompt injection.
 
 ## License

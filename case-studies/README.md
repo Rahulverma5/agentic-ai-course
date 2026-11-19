@@ -16,5 +16,6 @@ Numbers are quoted from the linked sources and are reported by those authors, no
 | 06 | [Harnesses for long-running agents](06-long-running-agent-harnesses.md) | Progress files, feature lists, one increment per session | Days 7, 15 |
 | 07 | [Customer-service agents & τ-bench](07-customer-service-agents-tau-bench.md) | Policy-following + consistency (pass^k) is the real bar | Days 11, capstone |
 | 08 | [Prompt injection & the lethal trifecta](08-prompt-injection-lethal-trifecta.md) | Architecture limits damage; filters don't | Day 12 |
+| 🔎 | **[Claude Code, inside out (4-part deep guide)](claude-code/README.md)** | Models, the loop, tools, subagents, context, memory, hooks, MCP, guardrails, power features & playbook | All days |
 
 **How to use them:** read one per day in Week 2–3 (~20 min). Answer the discussion questions in writing. Then apply one lesson to your capstone and measure it with the eval suite.

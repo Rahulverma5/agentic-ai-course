@@ -158,7 +158,7 @@ What drives each choice (🧠, consistent with documented behavior):
 
 ## 1.6 Why it keeps verifying (even after it "already processed" something)
 
-📘 "Verify results" is one of the three loop phases. The best-practices guide calls giving Claude a way to verify its work (tests, screenshots, expected output) the single highest-leverage thing you can do. ([Best practices](https://code.claude.com/docs/en/best-practices))
+📘 "Verify results" is one of the three loop phases. A core section of the best-practices guide is **"Give Claude a check to run"**: tests, a browser screenshot next to a mockup, a review by a *fresh* subagent that never saw the conversation (`/code-review`), asking for evidence (the command and its output), reviewing against a spec, or enforcing the check with a Stop hook. ([Best practices](https://code.claude.com/docs/en/best-practices))
 
 🧠 Why re-checking is rational for an agent:
 1. **Errors compound.** If each step is 95% reliable, 20 unchecked steps succeed only ~36% of the time (0.95²⁰). One cheap check after each risky step resets the odds.
@@ -191,8 +191,8 @@ It usually *doesn't* search when the answer is in the repo. Local truth beats we
 1. **Find the project's way of testing:** CLAUDE.md first, then `package.json` scripts / `pytest.ini` / `Makefile` / CI workflows.
 2. **Run the narrowest relevant test first** (the file or test name related to the change), then widen if that passes and the change is broad.
 3. **If no test exists**, a careful agent writes a small one that reproduces the bug *before* fixing it, so the fix can be proven.
-4. 📘 The best-practices guide recommends **test-driven loops**: ask Claude to write tests first, confirm they fail, commit them, then implement until they pass without changing the tests.
-5. 📘 Claude Code ships bundled skills such as `/verify` and `/run` (checking a change in the real app) and `/code-review`. Run `/help` to see what your version includes.
+4. 🧠 A **test-first loop** works especially well with agents: tests first, confirm they fail, then implement until they pass without changing the tests. The test is an objective "done" signal the agent can check itself. 📘 It's one form of the best-practices advice to *give Claude a check to run*. A **Stop hook** can enforce it ("don't finish until tests pass").
+5. 📘 Claude Code ships bundled skills such as `/verify` and `/run` (checking a change in the real app) and `/code-review` (a correctness review in a fresh subagent). Run `/help` to see what your version includes.
 
 **Prompt template:** *"Write a failing test for X in `tests/test_x.py`, run it to confirm it fails, then fix the code until it passes. Don't modify the test."*
 
