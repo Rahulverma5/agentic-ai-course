@@ -1,11 +1,17 @@
 __pycache__/
 *.pyc
+*.egg-info/
 .venv/
 venv/
 .env
 .ipynb_checkpoints/
-# generated capstone data
-shopease/data/*.db
-shopease/memory/
+.pytest_cache/
+# generated ShopEase data (python -m shopease.data recreates it)
+projects/shopease-support-agent/data/
+# eval outputs
+projects/shopease-support-agent/evals/report.md
+projects/shopease-support-agent/evals/results.jsonl
 # files the warm-up agent creates
-workspace/plan.md
+projects/file-assistant/workspace/plan.md
+# files notebooks create
+week-*/practice/scratch/

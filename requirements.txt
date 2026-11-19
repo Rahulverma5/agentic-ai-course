@@ -1,1 +1,16 @@
+# Base dependencies: light enough for a free 2-core Codespace (no PyTorch, no GPU).
 anthropic>=2.9
+openai>=1.50            # only for the free-provider swap (Gemini / Groq OpenAI-compatible endpoints)
+pydantic>=2.7
+python-dotenv>=1.0
+numpy
+pandas
+matplotlib
+rank_bm25               # Day 6 keyword search
+fastembed>=0.5          # Day 6 embeddings + reranking on CPU (ONNX, small models)
+mcp>=2.0                # Day 8 (2.x API: MCPServer, Client)
+fastapi                 # Day 15
+uvicorn
+httpx
+ipykernel
+pytest

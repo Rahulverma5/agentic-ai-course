@@ -1,0 +1,46 @@
+{
+  // GitHub Codespaces / VS Code Dev Container for the Agentic AI course.
+  // Sized for the FREE tier: 2-core machine, CPU only, light dependencies.
+  "name": "agentic-ai-course",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "hostRequirements": { "cpus": 2, "memory": "4gb" },
+
+  "features": {
+    // Node is only needed for the optional MCP Inspector on Day 8 (npx).
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
+  },
+
+  // Installs the base course dependencies + the course_utils and shopease packages (editable),
+  // then generates the ShopEase sample data. Framework libraries (Day 14) install on demand.
+  "postCreateCommand": "pip install --upgrade pip && pip install -r requirements.txt && pip install -e . && python -m shopease.data",
+
+  // Codespaces asks for these when the codespace is created. Add them once under
+  // GitHub → Settings → Codespaces → Secrets and they are injected as environment variables.
+  "secrets": {
+    "ANTHROPIC_API_KEY": {
+      "description": "Claude API key (main provider for the notebooks).",
+      "documentationUrl": "https://platform.claude.com/"
+    },
+    "GEMINI_API_KEY": {
+      "description": "Optional: free-tier Gemini key for the 'free swap' cells.",
+      "documentationUrl": "https://ai.google.dev/gemini-api/docs/openai"
+    },
+    "GROQ_API_KEY": {
+      "description": "Optional: free-tier Groq key for the 'free swap' cells.",
+      "documentationUrl": "https://console.groq.com/docs/openai"
+    }
+  },
+
+  "forwardPorts": [8000],
+  "portsAttributes": { "8000": { "label": "ShopEase API (Day 15)" } },
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-toolsai.jupyter", "bierner.markdown-mermaid"],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "jupyter.notebookFileRoot": "${workspaceFolder}"
+      }
+    }
+  }
+}
