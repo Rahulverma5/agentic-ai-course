@@ -22,7 +22,7 @@
 
 - "Memory" = what you choose to put back into the prompt.
 - "Cost" = how many tokens you resend, times how many loop steps you run.
-- "Context window" = the maximum the model can read in one call (Opus 5.5: 1M tokens).
+- "Context window" = the maximum the model can read in one call (current Gemini Flash models: ~1M tokens).
 
 **The math you'll use daily: cost of an agent run.**
 
@@ -33,20 +33,21 @@ $$\text{Input}_{total} = \sum_{k=0}^{n-1}(P_0 + k\,a) = nP_0 + a\frac{n(n-1)}{2}
 👉 **Input cost grows ~quadratically with steps.** A 30-step agent doesn't cost 3× a 10-step one. It costs ~5–9×. This is why caching (Day 5) and context trimming matter so much.
 
 ```python
-def agent_cost(n_steps, p0=3000, add_per_step=800, out_per_step=300, in_price=4.0, out_price=20.0):
-    """Estimate $ for an agent run. Prices are per 1M tokens (Opus 5.5 list prices)."""
+def agent_cost(n_steps, p0=3000, add_per_step=800, out_per_step=300, in_price=1.50, out_price=7.50):
+    """Estimate $ for an agent run. Prices are per 1M tokens (approx. paid Gemini Flash rates)."""
     inp = n_steps * p0 + add_per_step * n_steps * (n_steps - 1) / 2
     out = n_steps * out_per_step
     return (inp * in_price + out * out_price) / 1e6
 
 for n in (5, 10, 30):
-    print(f"{n:>2} steps: ${agent_cost(n):.3f}")
-# 5 steps: $0.122 · 10 steps: $0.324 · 30 steps: $1.932  ← 6× the steps, 16× the cost!
+    print(f"{n:>2} steps: ${agent_cost(n):.4f}")
+# 5 steps: $0.0458 · 10 steps: $0.1215 · 30 steps: $0.7245  ← 6× the steps, 16× the cost!
+# (On the free tier you pay $0, but the same curve applies to your rate-limit quota.)
 ```
 
 **Practical lessons**
-- Always log `response.usage` (input, output, cache tokens). You'll build a tracker today.
-- Output tokens cost ~5× input tokens. Verbose models cost more, and "think less" settings (effort) help.
+- Always log `response.usage_metadata` (prompt, output, thinking and cached tokens). You'll build a tracker today.
+- Output tokens (including **thinking** tokens) cost ~5× input tokens. Verbose models cost more, and "think less" settings (`thinking_level`) help.
 - Tokens ≈ ¾ of an English word. Code and non-English text use more tokens per word.
 
 📖 Deep dive: 🎥⭐ [Karpathy — Intro to Large Language Models (1h)](https://www.youtube.com/watch?v=zjkBMFhNj_g) · 🎥 [Karpathy — Software Is Changing (Again)](https://www.youtube.com/watch?v=LCEmiRjPEtQ) (Software 3.0, building *for* agents)
@@ -128,11 +129,11 @@ $$P(\text{success}) = p^n \qquad 0.95^{10} \approx 0.60, \quad 0.95^{30} \approx
 
 📖 Deep dive: ⭐ [Anthropic — Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents) · 🎥⭐ [Barry Zhang (Anthropic) — How We Build Effective Agents (15 min)](https://www.youtube.com/watch?v=D7_ipDqhtwk) · ⭐ [OpenAI — A Practical Guide to Building Agents (PDF)](https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf) · [Chip Huyen — Agents](https://huyenchip.com/2025/01/07/agents.html)
 
-### 🧪 Lab → do it in the practice notebook 1 — "Feel the tokens" (Colab, 20 min)
-1. Send the same question with a 100-word system prompt and then a 3,000-word one. Print `response.usage` for both.
+### 🧪 Lab → do it in the practice notebook 1 — "Feel the tokens" (20 min)
+1. Send the same question with a 100-word system instruction and then a 3,000-word one. Print `response.usage_metadata` for both.
 2. Run `agent_cost()` for 5/10/30 steps and plot the curve with matplotlib. Notice it isn't linear.
 3. Ask the same question 5 times and compare the answers. This is why agents need evals.
-4. 🆓 Swap: run step 1 with `free_llm("gemini", ...)` and compare `usage`.
+4. Compare `thinking_level="minimal"` vs `"high"` on a small reasoning question and look at `thoughts_token_count`.
 
 ### 🏗 Capstone — Day 1: project setup + synthetic data + cost tracker
 
@@ -176,16 +177,16 @@ db.commit()
 And a cost tracker, which you will reuse every day:
 
 ```python
-PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-haiku-5-5": (0.10, 0.50)}  # $/1M in, out
+# $/1M tokens: (input, output incl. thinking, cached input). Approximate paid prices; free tier = $0.
+PRICES = {"gemini-flash-latest": (1.50, 7.50, 0.15), "gemini-flash-lite-latest": (0.30, 2.50, 0.03)}
 
 class CostTracker:
     def __init__(self): self.calls = []
-    def add(self, model, usage):
-        i, o = PRICES[model]
-        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-        cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        cost = (usage.input_tokens * i + cache_write * i * 1.25 + cache_read * i * 0.05
-                + usage.output_tokens * o) / 1e6
+    def add(self, model, usage):  # usage = response.usage_metadata
+        i, o, c = PRICES[model]
+        cached = usage.cached_content_token_count or 0
+        out = (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
+        cost = ((usage.prompt_token_count - cached) * i + cached * c + out * o) / 1e6
         self.calls.append(cost)
         return cost
     def total(self): return sum(self.calls)
@@ -193,7 +194,7 @@ class CostTracker:
 tracker = CostTracker()
 ```
 
-> Cache multipliers (≈1.25× write, read = $0.20/MTok on Opus 5.5 ≈ 0.05×) are explained on Day 5. Always check the current pricing page.
+> Cached tokens are billed at roughly a tenth of the input price (Day 5). The real version lives in [`course_utils/cost.py`](../../course_utils/cost.py). Always check the [Gemini pricing page](https://ai.google.dev/gemini-api/docs/pricing).
 
 ### ✅ Checkpoint
 1. Why does an agent's input cost grow faster than linearly with steps?

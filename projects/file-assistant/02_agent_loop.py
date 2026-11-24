@@ -9,16 +9,18 @@ Try tasks like:
   - "Read todo.txt and create plan.md with the tasks ordered by priority."
   - "Make a file called ideas.txt with 5 project ideas for learning agents."
 
-Run:  python 02_agent_loop.py
+Run:  GEMINI_API_KEY=... python 02_agent_loop.py
 """
 
 import json
+import os
 from pathlib import Path
 
-import anthropic
+from google import genai
+from google.genai import types
 
-client = anthropic.Anthropic()
-MODEL = "claude-opus-5-5"
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+MODEL = os.getenv("COURSE_MODEL", "gemini-flash-latest")
 MAX_STEPS = 15  # safety: never loop forever
 WORKSPACE = (Path(__file__).parent / "workspace").resolve()
 WORKSPACE.mkdir(exist_ok=True)
@@ -66,17 +68,17 @@ def write_file(path: str, content: str) -> str:
 # name -> function, so the loop can dispatch any tool call
 TOOL_FUNCTIONS = {"list_files": list_files, "read_file": read_file, "write_file": write_file}
 
-# What the model sees
-TOOLS = [
+# What the model sees (plain JSON Schema; converted to Gemini FunctionDeclarations below)
+TOOL_DEFS = [
     {
         "name": "list_files",
         "description": "List all files in the workspace (relative paths, one per line).",
-        "input_schema": {"type": "object", "properties": {}},
+        "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "read_file",
         "description": "Read the full text of a file in the workspace.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {"path": {"type": "string", "description": "Relative path, e.g. 'notes.txt'"}},
             "required": ["path"],
@@ -85,7 +87,7 @@ TOOLS = [
     {
         "name": "write_file",
         "description": "Create or overwrite a file in the workspace with the given content.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Relative path, e.g. 'plan.md'"},
@@ -95,6 +97,16 @@ TOOLS = [
         },
     },
 ]
+
+
+TOOLS = [types.Tool(function_declarations=[
+    types.FunctionDeclaration(name=t["name"], description=t["description"], parameters_json_schema=t["parameters"])
+    for t in TOOL_DEFS])]
+CONFIG = types.GenerateContentConfig(
+    system_instruction=SYSTEM_PROMPT,
+    tools=TOOLS,
+    thinking_config=types.ThinkingConfig(thinking_level="MEDIUM"),  # how hard the model thinks
+)
 
 
 def run_tool(name: str, tool_input: dict) -> tuple[str, bool]:
@@ -108,64 +120,48 @@ def run_tool(name: str, tool_input: dict) -> tuple[str, bool]:
 # =============================================================================
 # THE AGENT LOOP  <- the important part. Think -> Act -> Observe -> repeat.
 # =============================================================================
-def run_agent(messages: list) -> None:
+def run_agent(contents: list) -> None:
     for step in range(1, MAX_STEPS + 1):
         # ---- THINK: send the whole history, the model decides what to do next
-        response = client.beta.messages.create(
-            model=MODEL,
-            max_tokens=16000,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages,
-            output_config={"effort": "medium"},  # how hard the model thinks: low/medium/high/...
-            # If a safety classifier declines, retry on a fallback model automatically.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
-        # Always save the reply as-is (it may contain thinking + tool_use blocks)
-        messages.append({"role": "assistant", "content": response.content})
+        response = client.models.generate_content(model=MODEL, contents=contents, config=CONFIG)
+        candidate = response.candidates[0]
+        # Always save the model turn as-is (it may contain thought signatures + function calls)
+        contents.append(candidate.content)
 
-        for block in response.content:
-            if block.type == "text" and block.text.strip():
-                print(f"\n🤖 {block.text}")
+        for part in candidate.content.parts or []:
+            if part.text and not part.thought and part.text.strip():
+                print(f"\n🤖 {part.text}")
 
         # ---- DONE? The model stops asking for tools when it thinks the task is finished.
-        if response.stop_reason == "end_turn":
-            return
-        if response.stop_reason == "refusal":
-            print("\n⚠️  The model declined this request.")
-            return
-        if response.stop_reason == "max_tokens":
-            print("\n⚠️  Reply was cut off (max_tokens).")
+        if not response.function_calls:
+            if candidate.finish_reason.name != "STOP":
+                print(f"\n⚠️  Stopped early: {candidate.finish_reason.name}")  # MAX_TOKENS, SAFETY, ...
             return
 
-        # ---- ACT: run every tool the model asked for (there can be several)
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
-            print(f"   🔧 step {step}: {block.name}({json.dumps(block.input)[:80]})")
-            result, is_error = run_tool(block.name, block.input)
-            tool_results.append(
-                {"type": "tool_result", "tool_use_id": block.id, "content": result, "is_error": is_error}
-            )
+        # ---- ACT: run every function the model asked for (there can be several)
+        parts = []
+        for call in response.function_calls:
+            print(f"   🔧 step {step}: {call.name}({json.dumps(dict(call.args or {}))[:80]})")
+            result, is_error = run_tool(call.name, dict(call.args or {}))
+            parts.append(types.Part(function_response=types.FunctionResponse(
+                id=call.id, name=call.name, response={"error": result} if is_error else {"output": result})))
 
-        # ---- OBSERVE: give ALL results back in ONE user message, then loop again
-        messages.append({"role": "user", "content": tool_results})
+        # ---- OBSERVE: give ALL results back in ONE user turn, then loop again
+        contents.append(types.Content(role="user", parts=parts))
 
     print(f"\n⚠️  Stopped after {MAX_STEPS} steps (safety limit).")
 
 
 def main() -> None:
     print(f"File assistant. Workspace: {WORKSPACE}\nType a task, or 'quit'.")
-    messages: list = []  # kept across tasks, so the agent remembers the conversation
+    contents: list = []  # kept across tasks, so the agent remembers the conversation
     while True:
         task = input("\n👤 > ").strip()
         if task.lower() in {"quit", "exit", "q"}:
             break
         if task:
-            messages.append({"role": "user", "content": task})
-            run_agent(messages)
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=task)]))
+            run_agent(contents)
 
 
 if __name__ == "__main__":

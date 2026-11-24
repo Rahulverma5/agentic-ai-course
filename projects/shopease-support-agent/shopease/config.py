@@ -12,8 +12,8 @@ POLICY_DIR = DATA_DIR / "policies"
 MEMORY_DIR = DATA_DIR / "memory"
 TRACE_DIR = DATA_DIR / "traces"
 
-MODEL = os.getenv("COURSE_MODEL", "claude-opus-5-5")
-CHEAP_MODEL = os.getenv("COURSE_CHEAP_MODEL", "claude-haiku-5-5")
+MODEL = os.getenv("COURSE_MODEL", "gemini-flash-latest")
+CHEAP_MODEL = os.getenv("COURSE_CHEAP_MODEL", "gemini-flash-lite-latest")
 
 # Business rules live in code, not in the prompt.
 RETURN_WINDOW_DAYS = 30

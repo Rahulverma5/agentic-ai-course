@@ -1,6 +1,5 @@
 # Base dependencies: light enough for a free 2-core Codespace (no PyTorch, no GPU).
-anthropic>=2.9
-openai>=1.50            # only for the free-provider swap (Gemini / Groq OpenAI-compatible endpoints)
+google-genai>=3.6       # Gemini API (official SDK)
 pydantic>=2.7
 python-dotenv>=1.0
 numpy

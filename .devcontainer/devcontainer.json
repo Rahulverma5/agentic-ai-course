@@ -17,17 +17,9 @@
   // Codespaces asks for these when the codespace is created. Add them once under
   // GitHub → Settings → Codespaces → Secrets and they are injected as environment variables.
   "secrets": {
-    "ANTHROPIC_API_KEY": {
-      "description": "Claude API key (main provider for the notebooks).",
-      "documentationUrl": "https://platform.claude.com/"
-    },
     "GEMINI_API_KEY": {
-      "description": "Optional: free-tier Gemini key for the 'free swap' cells.",
-      "documentationUrl": "https://ai.google.dev/gemini-api/docs/openai"
-    },
-    "GROQ_API_KEY": {
-      "description": "Optional: free-tier Groq key for the 'free swap' cells.",
-      "documentationUrl": "https://console.groq.com/docs/openai"
+      "description": "Gemini API key (free at Google AI Studio). Used by every notebook and project.",
+      "documentationUrl": "https://aistudio.google.com/apikey"
     }
   },
 

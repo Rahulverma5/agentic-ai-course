@@ -4,7 +4,7 @@
 
 ⏱ 60 min theory · 30 min lab · 60 min capstone
 
-**Goals:** write a production-quality loop from memory; understand stop reasons, budgets, ReAct vs plan-and-execute vs todo lists, and thinking/effort.
+**Goals:** write a production-quality loop from memory; understand stop conditions, budgets, ReAct vs plan-and-execute vs todo lists, and thinking levels.
 
 
 ### 🎥 Watch first (short videos)
@@ -18,45 +18,48 @@
 You built this in `02_agent_loop.py`. Here is the minimal core, with the production guards added:
 
 ```python
-def run_agent(messages, tools, system, max_steps=15, max_cost=0.50):
-    for step in range(max_steps):
-        r = client.messages.create(model=MODEL, max_tokens=16000, system=system,
-                                   tools=tools, messages=messages)
-        tracker.add(MODEL, r.usage)
-        messages.append({"role": "assistant", "content": r.content})
+from google.genai import types
+from course_utils import user, to_gemini_tools, function_response
 
-        if r.stop_reason == "end_turn":                      # model decided it's done
-            return next((b.text for b in r.content if b.type == "text"), "")
-        if r.stop_reason in ("refusal", "max_tokens"):       # handle, don't crash
-            return f"[stopped: {r.stop_reason}]"
-        if tracker.total() > max_cost:                       # budget guard
+def run_agent(question, tools, system, max_steps=15, max_cost=0.50):
+    contents = [user(question)]
+    config = types.GenerateContentConfig(system_instruction=system, tools=to_gemini_tools(tools))
+    for step in range(max_steps):
+        r = client.models.generate_content(model=MODEL, contents=contents, config=config)
+        tracker.add(MODEL, r.usage_metadata)
+        contents.append(r.candidates[0].content)              # keep it verbatim (thought signatures)
+
+        if not r.function_calls:                              # model decided it's done
+            finish = r.candidates[0].finish_reason.name
+            return text_of(r) if finish == "STOP" else f"[stopped: {finish}]"   # MAX_TOKENS, SAFETY…
+        if tracker.total() > max_cost:                        # budget guard
             return "[stopped: cost budget exceeded]"
 
-        results = []
-        for b in r.content:
-            if b.type == "tool_use":
-                out, err = run_tool(b.name, b.input)
-                results.append({"type": "tool_result", "tool_use_id": b.id, "content": out, "is_error": err})
-        messages.append({"role": "user", "content": results})
+        parts = []
+        for fc in r.function_calls:
+            out, err = run_tool(fc.name, dict(fc.args))
+            parts.append(function_response(fc, out, is_error=err))
+        contents.append(types.Content(role="user", parts=parts))  # ALL responses in ONE turn
     return "[stopped: step limit]"
 ```
 
-**Stop reasons you must handle**
+**How the loop knows what happened** (Gemini)
 
-| `stop_reason` | Meaning | What to do |
+| Signal | Meaning | What to do |
 |---|---|---|
-| `tool_use` | Wants tools | Run them, loop |
-| `end_turn` | Finished | Return the answer |
-| `max_tokens` | Reply cut off | Raise `max_tokens` or continue |
-| `pause_turn` | A server-side tool paused a long turn | Append the reply and call again |
-| `refusal` | A safety classifier declined | Show a message, log it, optionally fall back |
+| `response.function_calls` not empty | Wants tools | Run them, send `function_response`s, loop |
+| No function calls, `finish_reason == STOP` | Finished | Return the answer |
+| `MAX_TOKENS` | Reply cut off | Raise `max_output_tokens` or continue |
+| `SAFETY` / `PROHIBITED_CONTENT` / `BLOCKLIST` | Blocked by safety filters | Show a message, log it, don't retry blindly |
+| `MALFORMED_FUNCTION_CALL` | The model produced an invalid call | Retry the step; simplify the schema |
+| `MISSING_THOUGHT_SIGNATURE` | You didn't pass the model turn back unchanged | Append `candidates[0].content` as received |
 
 **Practical lessons**
 - **Always have three budgets:** steps, cost and wall-clock time. Unbounded agents become bills.
 - **Log every step** (tool name, args, result size, tokens). You'll turn this into tracing on Day 13.
-- The loop stays the same across Claude Code, OpenAI Agents SDK and LangGraph's prebuilt agent. Only the extras differ.
+- The loop stays the same across Google ADK, Claude Code, OpenAI Agents SDK and LangGraph's prebuilt agent. Only the extras differ.
 
-📖 Deep dive: 📘⭐ [Claude Agent SDK — How the agent loop works](https://code.claude.com/docs/en/agent-sdk/agent-loop)
+📖 Deep dive: 📘⭐ [Gemini — Function calling (multi-turn and parallel calls)](https://ai.google.dev/gemini-api/docs/generate-content/function-calling) · [How the agent loop works (Claude Agent SDK docs, provider-neutral concepts)](https://code.claude.com/docs/en/agent-sdk/agent-loop)
 
 ### 3.2 Planning styles: ReAct vs plan-and-execute vs todo list
 
@@ -93,34 +96,36 @@ def todo_write(items: list[dict]) -> str:
 
 📖 Deep dive: 📄 [ReAct paper](https://arxiv.org/abs/2210.03629) · 📄 [Reflexion — verbal self-reflection (2023)](https://arxiv.org/abs/2303.11366)
 
-### 3.3 Thinking, effort and interleaved reasoning
+### 3.3 Thinking levels and interleaved reasoning
 
 **Intuition.** Modern models can "think" (produce hidden reasoning tokens) before answering, **and between tool calls** (interleaved thinking): *"the search returned nothing → maybe the email has a typo → let me try a partial search."* Reflexion-style self-critique is now built into the model.
 
-**The control knob is `effort`** (`low | medium | high | xhigh | max`):
+**The control knob is `thinking_level`** (`minimal | low | medium | high`; older Gemini 2.5 models used a numeric `thinking_budget` instead):
 
 ```python
-r = client.messages.create(
-    model=MODEL, max_tokens=16000, tools=TOOLS, messages=messages,
-    output_config={"effort": "low"},     # simple support lookups
+config = types.GenerateContentConfig(
+    tools=to_gemini_tools(TOOLS),
+    thinking_config=types.ThinkingConfig(thinking_level="LOW"),   # simple support lookups
 )
-# Opus 5.5 always thinks (adaptive); effort controls how much. Default is "medium".
+r = client.models.generate_content(model=MODEL, contents=contents, config=config)
+print(r.usage_metadata.thoughts_token_count)   # thinking tokens are billed like output tokens
 ```
 
-| Effort | Cost/latency | Use for |
+| Thinking level | Cost/latency | Use for |
 |---|---|---|
-| `low` | Cheapest, fastest | Classification, simple lookups, subagents |
+| `minimal` / `low` | Cheapest, fastest | Classification, simple lookups, subagents |
 | `medium` | Balanced | Most support/agent turns |
-| `high` / `xhigh` | Expensive | Hard reasoning, coding, long agentic work |
-| `max` | Highest | When correctness matters more than cost |
+| `high` | Expensive | Hard reasoning, coding, long agentic work |
+
+Not every model supports every level; leave it unset to use the model's default.
 
 **Practical lessons**
-- Tune effort **per route**, not globally. The router (Day 4) can pick the effort level.
-- Lower effort also means fewer, more consolidated tool calls and shorter replies.
-- Measure with evals (Day 11) before raising effort "just in case".
+- Tune thinking **per route**, not globally. The router (Day 4) can pick the level.
+- Less thinking usually means lower latency and fewer thinking tokens; check that tool use stays correct.
+- Measure with evals (Day 11) before raising the thinking level "just in case".
 - Older pattern: the "think tool" (a no-op tool where the model writes notes). It's useful history, but native interleaved thinking mostly replaces it.
 
-📖 Deep dive: [Anthropic — The "think" tool](https://www.anthropic.com/engineering/claude-think-tool) (history and when it still helps)
+📖 Deep dive: 📘 [Gemini — Thinking](https://ai.google.dev/gemini-api/docs/thinking) · [Anthropic — The "think" tool](https://www.anthropic.com/engineering/claude-think-tool) (history of the idea)
 
 ### 3.4 Stopping, looping and getting stuck
 
@@ -130,31 +135,31 @@ Common failure modes and fixes:
 |---|---|---|
 | Infinite loop | Same tool, same args, again and again | Detect repeats (hash of name + args) and inject "you already tried X" |
 | Premature stop | Says "done" without verifying | Prompt: "verify with a tool before finishing", or add a checker step |
-| Over-calling | 20 lookups for a 2-step task | Better tool design, lower effort |
+| Over-calling | 20 lookups for a 2-step task | Better tool design, clearer instructions |
 | Hallucinated tool result | Claims a fact no tool returned | System prompt: "Only state order facts returned by tools", plus a trajectory eval (Day 11) |
 
 ```python
 from collections import Counter
 seen = Counter()
-def repeated(b):                       # call inside the loop for each tool_use block
-    key = (b.name, json.dumps(b.input, sort_keys=True))
+def repeated(fc):                      # call inside the loop for each function call
+    key = (fc.name, json.dumps(dict(fc.args), sort_keys=True))
     seen[key] += 1
     return seen[key] >= 3              # third identical call → warn the model / stop
 ```
 
 ### 🧪 Lab → do it in the practice notebook 3 — Planning styles race (30 min)
 Give the agent a multi-step task: *"For every gold customer, list undelivered orders and draft one apology email per customer."*
-1. Run plain ReAct. 2. Run with a `todo_write` tool. 3. Run plan-and-execute (Opus 5.5 writes a plan, Haiku 5.5 executes each step).
-Compare steps, cost and correctness in a table. Then try `effort` = low vs high.
+1. Run plain ReAct. 2. Run with a `todo_write` tool. 3. Run plan-and-execute (`MODEL` writes a plan, `CHEAP_MODEL` executes each step).
+Compare steps, cost and correctness in a table. Then try `thinking_level` = low vs high.
 
 ### 🏗 Capstone — Day 3: `shopease/agent.py`
 Wire Day 2's tools into `run_agent` with a ShopEase system prompt (role, tone, "never promise refunds the tools don't confirm", escalation rules). Add step/cost/time budgets and repeat detection. Test it on 10 realistic customer messages and save the transcripts. You'll turn them into evals on Day 11.
 
 ### ✅ Checkpoint
-1. List the stop reasons and what your loop does for each.
+1. List the ways a turn can end (function calls, STOP, MAX_TOKENS, SAFETY…) and what your loop does for each.
 2. When does plan-and-execute beat ReAct? When does it fail?
 3. Why does rewriting a todo list help on long tasks? (Hint: where in the context does it end up?)
-4. You lower effort from high to low and accuracy drops 2% while cost drops 60%. How do you decide?
+4. You lower the thinking level from high to low and accuracy drops 2% while cost drops 60%. How do you decide?
 
 ---
 

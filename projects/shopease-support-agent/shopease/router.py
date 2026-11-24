@@ -34,13 +34,18 @@ def heuristic_route(message: str) -> Route:
 
 
 def classify(message: str, client, tracker=None) -> Route:
+    from google.genai import types
+
     try:
-        r = client.messages.parse(model=config.CHEAP_MODEL, max_tokens=300, system=ROUTER_SYSTEM,
-                                  output_format=Route,
-                                  messages=[{"role": "user", "content": message}])
+        r = client.models.generate_content(
+            model=config.CHEAP_MODEL, contents=message,
+            config=types.GenerateContentConfig(system_instruction=ROUTER_SYSTEM, response_mime_type="application/json",
+                                               response_schema=Route))  # structured output → r.parsed
         if tracker:
-            tracker.add(config.CHEAP_MODEL, r.usage, label="router")
-        return r.parsed_output
+            tracker.add(config.CHEAP_MODEL, r.usage_metadata, label="router")
+        if r.parsed is None:
+            raise ValueError("no structured output")
+        return r.parsed
     except Exception as e:  # never let the router take the whole system down
         print(f"[router] falling back to keywords ({type(e).__name__})")
         return heuristic_route(message)
@@ -52,11 +57,15 @@ If the passages don't answer the question, say you'll connect them with the supp
 
 
 def answer_faq(message: str, client, tracker=None) -> str:
+    from google.genai import types
+
+    from course_utils.llm import text_of
+
     hits = rag.search(message, k=3)
     passages = "\n\n".join(f"<passage source=\"{h['source']}\">\n{h['text']}\n</passage>" for h in hits)
-    r = client.messages.create(model=config.CHEAP_MODEL, max_tokens=600, system=FAQ_SYSTEM,
-                               output_config={"effort": "low"},
-                               messages=[{"role": "user", "content": f"{passages}\n\nQuestion: {message}"}])
+    r = client.models.generate_content(
+        model=config.CHEAP_MODEL, contents=f"{passages}\n\nQuestion: {message}",
+        config=types.GenerateContentConfig(system_instruction=FAQ_SYSTEM, max_output_tokens=600))
     if tracker:
-        tracker.add(config.CHEAP_MODEL, r.usage, label="faq")
-    return "".join(b.text for b in r.content if b.type == "text")
+        tracker.add(config.CHEAP_MODEL, r.usage_metadata, label="faq")
+    return text_of(r)

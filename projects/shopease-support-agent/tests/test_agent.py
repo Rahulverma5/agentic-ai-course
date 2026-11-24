@@ -12,28 +12,30 @@ from graders import grade  # noqa: E402
 
 def test_agent_loop_runs_tools_and_answers(data_dir):
     client = FakeClient([
-        msg(tool("check_refund_eligibility", {"order_id": "O2002"}), stop="tool_use"),
+        msg(tool("check_refund_eligibility", {"order_id": "O2002"})),
         msg(text("Sorry, O2002 was delivered 36 days ago, outside our 30-day window.")),
     ])
     agent = SupportAgent("C001", client=client)
     reply = agent.chat("Refund my coffee grinder O2002")
     assert reply.route == "order_issue" and reply.tool_calls == ["check_refund_eligibility"]
     assert "30-day" in reply.text and reply.steps == 2
-    # the tool result was sent back with the matching id
-    last_user = client.messages.calls[1]["messages"][-1]
-    assert last_user["content"][0]["tool_use_id"] == "toolu_1" and '"eligible": false' in last_user["content"][0]["content"]
-    # system prompt is cached and stable
-    assert client.messages.calls[0]["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert client.messages.calls[0]["system"] == client.messages.calls[1]["system"]
+    # the function result was sent back, matched by id and name
+    last_user = client.models.calls[1]["contents"][-1]
+    fr = last_user.parts[0].function_response
+    assert last_user.role == "user" and fr.id == "call_1" and fr.name == "check_refund_eligibility"
+    assert '"eligible": false' in fr.response["output"]
+    # the system instruction is identical on every call: a stable prefix for Gemini's implicit cache
+    cfg0, cfg1 = client.models.calls[0]["config"], client.models.calls[1]["config"]
+    assert cfg0.system_instruction == cfg1.system_instruction and "ShopEase" in cfg0.system_instruction
 
 
 def test_repeat_detection_and_step_limit(data_dir):
-    loop = [msg(tool("get_order", {"order_id": "O2001"}, id=f"t{i}"), stop="tool_use") for i in range(4)]
+    loop = [msg(tool("get_order", {"order_id": "O2001"}, id=f"t{i}")) for i in range(4)]
     agent = SupportAgent("C001", client=FakeClient(loop), max_steps=4)
     reply = agent.chat("where is my order")
     assert reply.stop_reason == "step_limit"
-    third_result = agent.history[6]["content"][0]  # user msg, (assistant, results) x3 → index 6 is 3rd results
-    assert third_result["is_error"] and "already called" in third_result["content"]
+    third = agent.history[6].parts[0].function_response  # user msg, (model, results) x3 → index 6 = 3rd results
+    assert "already called" in third.response["error"]
 
 
 def test_output_guard_blocks_leaks(data_dir):
@@ -45,14 +47,14 @@ def test_output_guard_blocks_leaks(data_dir):
 def test_human_route_skips_agent(data_dir):
     client = FakeClient([], route="human")
     reply = SupportAgent("C002", client=client).chat("I want a manager")
-    assert reply.text == HANDOFF_TEXT and client.messages.calls == []
+    assert reply.text == HANDOFF_TEXT and client.models.calls == []
 
 
 def test_router_fallback_and_pii_masking():
     class Broken:
-        class messages:
+        class models:
             @staticmethod
-            def parse(**kw):
+            def generate_content(**kw):
                 raise ConnectionError("offline")
     assert router.classify("I will sue you", Broken).route == "human"
     assert router.classify("where is my order O2001", Broken).route == "order_issue"

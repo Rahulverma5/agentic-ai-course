@@ -35,7 +35,7 @@ def test_streaming_api(data_dir, monkeypatch):
     import app as app_module
     from shopease.agent import SupportAgent
 
-    fake = FakeClient([msg(tool("get_order", {"order_id": "O2001"}), stop="tool_use"),
+    fake = FakeClient([msg(tool("get_order", {"order_id": "O2001"})),
                        msg(text("Your smart watch was delivered on 2026-11-08."))])
     monkeypatch.setattr(app_module, "SupportAgent",
                         lambda cid, **kw: SupportAgent(cid, client=fake, **(kw | {"stream": False})))
@@ -50,11 +50,7 @@ def test_eval_runner_end_to_end(data_dir, monkeypatch):
     sys.path.insert(0, str(ROOT / "evals"))
     import run_evals
 
-    class AlwaysText(FakeClient):
-        def __init__(self):
-            super().__init__([], route="faq")
-            self.messages.create = lambda **kw: msg(text("Standard shipping takes 3-5 business days."))
-
-    code = run_evals.main(["--only", "faq-shipping"], client=AlwaysText())
+    client = FakeClient([], route="faq", default_text="Standard shipping takes 3-5 business days.")
+    code = run_evals.main(["--only", "faq-shipping"], client=client)
     assert code == 0
     assert "faq-shipping" in (ROOT / "evals" / "report.md").read_text()

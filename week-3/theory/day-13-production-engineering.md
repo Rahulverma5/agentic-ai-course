@@ -54,11 +54,11 @@ def traced(kind):
 
 | Problem | Pattern | Detail |
 |---|---|---|
-| API 429/5xx/timeouts | **Retry with exponential backoff + jitter** | The SDK retries 2× by default (`max_retries`); add retries for *your* tools |
-| Slow calls | **Timeouts** at every layer | `anthropic.Anthropic(timeout=60)`; tool timeouts; a whole-run deadline |
+| API 429/5xx/timeouts | **Retry with exponential backoff + jitter** | `types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=6, http_status_codes=[429, 503]))` (course_utils does this); add retries for *your* tools |
+| Slow calls | **Timeouts** at every layer | `types.HttpOptions(timeout=60_000)` (milliseconds); tool timeouts; a whole-run deadline |
 | Retry causes double refunds | **Idempotency keys** | `refund(order_id, key=f"{conversation_id}:{order_id}")` and dedupe in the DB |
-| Provider outage / refusal | **Fallbacks** | Server-side `fallbacks` (beta), or catch and retry on another model |
-| Bad tool output crashes the loop | **Errors as results** | `is_error: True`, never an exception that kills the run |
+| Provider outage / safety block / quota exhausted | **Fallbacks** | Catch the error (or a `SAFETY` finish reason) and retry on another model, e.g. Flash → Flash-Lite |
+| Bad tool output crashes the loop | **Errors as results** | `function_response(..., response={"error": ...})`, never an exception that kills the run |
 | Runaway agent | **Budgets** | Steps, cost, time (Day 3) |
 
 ```python
@@ -76,10 +76,10 @@ def with_retries(fn, *args, attempts=4, base=0.5, **kw):
 
 | # | Lever | Typical effect | Trade-off |
 |---|---|---|---|
-| 1 | **Prompt caching** (Day 5) | 50–90% off repeated input | None if the prefix is stable |
+| 1 | **Caching** (Day 5: implicit + explicit) | Up to ~90% off repeated input | None if the prefix is stable (explicit: storage fee) |
 | 2 | **Context hygiene:** truncate tool output, trim history | Large on long runs | Possible info loss |
 | 3 | **Routing:** easy traffic to cheap paths (Day 4) | Often the biggest saving | Misroutes; needs a router eval |
-| 4 | **Effort tuning** per route | Fewer thinking/output tokens | Quality on hard cases; measure it |
+| 4 | **Thinking-level tuning** per route | Fewer thinking tokens | Quality on hard cases; measure it |
 | 5 | **Smaller model for subtasks** (judges, summaries, subagents) | 10–40× cheaper per token | Quality on those subtasks |
 | 6 | **Batch API** for offline work (evals, backfills) | ~50% off | Async results (not real-time) |
 | 7 | Output length limits ("answer in ≤120 words") | Fewer output tokens (5× price) | Terser replies |
@@ -90,22 +90,19 @@ $$E[\text{cost}] = c_s + (1-a)\,c_b \quad\text{vs}\quad c_b \qquad\Rightarrow\qu
 
 Example: c_s = $0.002, c_b = $0.04, a = 0.7 ⇒ E = 0.002 + 0.3 × 0.04 = **$0.014** (65% saving). It's only valid if the *check* that decides whether to escalate is reliable, so measure it with evals.
 
-> 💡 Before building a multi-model cascade, try the strong model at **lower effort** first. It often matches older setups at lower cost, keeps a single cache namespace, and is less code.
+> 💡 Before building a multi-model cascade, try the strong model at a **lower thinking level** first. It often matches a cascade at lower complexity, keeps a single cache, and is less code.
 
 **Judge cost per *completed task*, not per call.** A cheap call that needs 3 retries isn't cheap.
 
 ```python
-from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
-from anthropic.types.messages.batch_create_params import Request
-
-batch = client.messages.batches.create(requests=[
-    Request(custom_id=c["id"], params=MessageCreateParamsNonStreaming(
-        model=CHEAP_MODEL, max_tokens=1000, messages=[{"role": "user", "content": c["input"]}]))
-    for c in cases])
-# poll client.messages.batches.retrieve(batch.id).processing_status until "ended", then read results by custom_id
+requests = [{"contents": [{"role": "user", "parts": [{"text": c["input"]}]}], "metadata": {"key": c["id"]}}
+            for c in cases]
+job = client.batches.create(model=CHEAP_MODEL, src=requests, config={"display_name": "eval-run"})
+# poll client.batches.get(name=job.name).state until JOB_STATE_SUCCEEDED,
+# then read job.dest.inlined_responses (in request order; key them by your metadata)
 ```
 
-📖 Deep dive: 📘 [Claude docs — Batch processing](https://platform.claude.com/docs/en/build-with-claude/batch-processing)
+📖 Deep dive: 📘 [Gemini — Batch API](https://ai.google.dev/gemini-api/docs/batch-api) (≈50% of interactive price, ~24 h turnaround)
 
 ### 13.4 Latency levers
 
@@ -116,12 +113,12 @@ What users feel is **time to first token** (TTFT) and total time. Agent latency 
 | **Streaming** | Perceived latency (TTFT) | Show text as it's generated; show "checking your order…" during tools |
 | **Caching** | TTFT on long prefixes | Cached prefixes are processed much faster |
 | **Parallel tool calls** (Day 2) | Total time | Run independent tools concurrently |
-| **Fewer steps** | Total time | Better tools (one `get_customer_overview` instead of 3 calls), lower effort |
+| **Fewer steps** | Total time | Better tools (one `get_customer_overview` instead of 3 calls), lower thinking level |
 | **Router fast path** | Total time for easy traffic | FAQ answers without the agent loop |
-| Fast mode / smaller models | Output speed | Premium pricing or quality trade-offs |
+| Smaller / faster models (Flash-Lite) | Output speed | Quality trade-offs: measure with evals |
 
 ### 🧪 Lab → do it in the practice notebook 13 — Optimization sprint (30 min)
-Take the capstone and run the eval suite as a baseline (pass rate, $ per conversation, p50/p95 latency). Apply 3 levers one at a time (caching, effort per route, Haiku judge via Batch) and re-run evals after each. Present a before/after table. A lever counts only if quality holds.
+Take the capstone and run the eval suite as a baseline (pass rate, $ per conversation, p50/p95 latency). Apply 3 levers one at a time (caching, thinking level per route, Flash-Lite judge via Batch) and re-run evals after each. Present a before/after table. A lever counts only if quality holds.
 
 ### 🏗 Capstone — Day 13
 Add tracing on every LLM and tool call (OpenTelemetry → Langfuse, or the minimal tracer), retries, timeouts, idempotent refunds and a model fallback. `report.md` now includes cost per conversation, cache hit rate, p50/p95 latency and steps per conversation.

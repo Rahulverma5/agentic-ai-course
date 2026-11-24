@@ -35,7 +35,7 @@ flowchart TB
 **Evolution**
 - **2023, MemGPT:** treat the context like RAM and external storage like disk. The model *pages* information in and out with function calls.
 - **2024, vector memory:** embed every message and retrieve the similar ones. Noisy; it returns "similar" rather than "relevant".
-- **2025+, explicit memory tools and files:** the model decides what's worth saving (`memory.create("/customers/C003.md", ...)`), and files are human-readable and editable. Claude's memory tool and Claude Code's `CLAUDE.md` files follow this pattern. Agent Skills apply the same idea to procedural memory.
+- **2025+, explicit memory tools and files:** the model decides what's worth saving (`memory.create("/customers/C003.md", ...)`), and files are human-readable and editable. Coding agents' project memory files (`GEMINI.md` in Gemini CLI, `CLAUDE.md` in Claude Code, `AGENTS.md`) and memory tools follow this pattern. Agent Skills apply the same idea to procedural memory.
 
 A minimal file-based memory as tools:
 
@@ -54,13 +54,20 @@ def recall(customer_id: str) -> str:
 
 Load `recall()` into the context at the **start** of a conversation, after the stable cached prefix, and give the agent `remember` as a tool with clear rules on what is worth saving.
 
-Claude's built-in memory tool (client-side: you implement the storage, the model gets a standard file-like interface):
+With Gemini you expose memory as ordinary function declarations (the agent decides when to call them):
 
 ```python
-tools = [{"type": "memory_20250818", "name": "memory"}]   # model issues view/create/str_replace/... commands
+MEMORY_TOOLS = [
+    {"name": "remember", "description": "Save one stable, useful fact about this customer for future sessions.",
+     "input_schema": {"type": "object", "properties": {"fact": {"type": "string"}}, "required": ["fact"]}},
+]
+config = types.GenerateContentConfig(system_instruction=f"{SYSTEM}\n\n## Saved notes\n{recall(customer_id)}",
+                                     tools=to_gemini_tools(MEMORY_TOOLS))
 ```
 
-📖 Deep dive: 📄 [MemGPT (2023)](https://arxiv.org/abs/2310.08560) · 📘 [Claude docs — Memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) · [Anthropic — Agent Skills (procedural memory)](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)
+> ADK (Day 14) also ships session state and memory services if you'd rather not build this yourself.
+
+📖 Deep dive: 📄 [MemGPT (2023)](https://arxiv.org/abs/2310.08560) · [Anthropic — Agent Skills (procedural memory)](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills)
 
 ### 7.3 What to store and what to forget
 

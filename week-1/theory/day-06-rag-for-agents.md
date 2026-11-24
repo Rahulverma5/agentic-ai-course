@@ -81,12 +81,13 @@ print(rrf(["returns", "shipping", "warranty"], ["warranty", "returns", "payments
 ### 6.4 Reranking and contextual retrieval
 
 - **Reranking:** retrieve ~20–50 candidates cheaply, then score each (query, chunk) pair with a stronger model (a cross-encoder like `cross-encoder/ms-marco-MiniLM-L-6-v2`, or a cheap LLM) and keep the top 3–5. Precision improves a lot, at the cost of some added latency.
-- **Contextual retrieval (Anthropic, 2024):** before embedding, prepend a short LLM-written context to each chunk. For example: *"This chunk is from ShopEase's Returns policy, section on electronics."* Chunks stop being "orphaned". Anthropic reported large reductions in retrieval failures when they combined contextual embeddings with contextual BM25 and reranking. Cheap to do with Haiku + prompt caching over the full document.
+- **Contextual retrieval (Anthropic, 2024):** before embedding, prepend a short LLM-written context to each chunk. For example: *"This chunk is from ShopEase's Returns policy, section on electronics."* Chunks stop being "orphaned". Anthropic reported large reductions in retrieval failures when they combined contextual embeddings with contextual BM25 and reranking. Cheap to do with a small model (Flash-Lite) plus caching of the full document.
 
 ```python
 def contextualize(doc_text, chunk):
-    return ask(CHEAP_MODEL, f"<document>{doc_text}</document>\nHere is a chunk:\n<chunk>{chunk}</chunk>\n"
-                            "Write 1 short sentence situating this chunk within the document. Only the sentence.") + "\n" + chunk
+    return ask(f"<document>{doc_text}</document>\nHere is a chunk:\n<chunk>{chunk}</chunk>\n"
+               "Write 1 short sentence situating this chunk within the document. Only the sentence.",
+               model=CHEAP_MODEL) + "\n" + chunk
 ```
 
 📖 Deep dive: ⭐ [Anthropic — Introducing Contextual Retrieval](https://www.anthropic.com/engineering/contextual-retrieval)
