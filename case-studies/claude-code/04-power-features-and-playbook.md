@@ -191,3 +191,5 @@ flowchart LR
 **Exercise:** set up this course repo for Claude Code. Write a CLAUDE.md (≤60 lines) with the test command, a PostToolUse formatter hook, a deny rule for `.env`, and a `code-reviewer` subagent on Haiku. Then ask it to add a new ShopEase eval case and check that it ran the tests.
 
 [← Back to the guide index](README.md)
+
+**Next:** [5 · Low-level design: the harness on one page →](05-low-level-design.md)

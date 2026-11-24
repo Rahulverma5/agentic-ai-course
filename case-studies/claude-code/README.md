@@ -40,6 +40,7 @@ Every behavior you see (searching before editing, running the tests again, askin
 | 2 | [Context, memory & prompt management](02-context-memory-and-prompts.md) | What fills the context window; compaction; caching; the CLAUDE.md hierarchy and auto memory; skills; writing great project memory |
 | 3 | [Extensibility & guardrails](03-extensibility-and-guardrails.md) | Hooks, MCP, skills, slash commands, plugins, custom subagents; permission modes, rules, sandboxing, checkpoints; headless & SDK |
 | 4 | [Power features & the playbook](04-power-features-and-playbook.md) | `/btw`, `/compact`, `/context`, `/rewind`, plan mode, background tasks, worktrees, shortcuts, and a workflow playbook for using it optimally |
+| 5 | [Low-level design (one page)](05-low-level-design.md) | Block diagram + component interfaces + ~250 lines of runnable Python modelling the whole harness: loop, permissions, hooks, context, checkpoints, subagents |
 
 ## Legend: how sure is each statement?
 - 📘 **Documented:** stated in Anthropic's docs or engineering posts (linked).
