@@ -4,7 +4,7 @@
 
 ⏱ 60 min theory · 30 min lab · 60 min capstone
 
-**Goals:** master the tool-call protocol, strict schemas, parallel calls and error handling; learn to *design* tools (the agent–computer interface).
+**Goals:** master the function-call protocol, precise schemas, structured output, parallel calls and error handling; learn to *design* tools (the agent–computer interface).
 
 
 ### 🎥 Watch first (short videos)
@@ -15,45 +15,46 @@
 
 ### 2.1 The protocol, precisely
 
-**Intuition.** A tool call is a *request form* the model fills in. Your program reads the form, does the work and sends back a *receipt* (`tool_result`) with the matching `tool_use_id`.
+**Intuition.** A function call is a *request form* the model fills in. Your program reads the form, does the work and sends back a *receipt* (`function_response`) that names the same function (and call `id`).
 
 ```mermaid
 sequenceDiagram
     participant App as Your code
     participant LLM as Model
-    App->>LLM: messages + tools[get_order]
-    LLM-->>App: tool_use {id: t1, name: get_order, input: {order_id: "O1007"}}
-    Note over App: stop_reason = "tool_use"
+    App->>LLM: contents + tools[get_order]
+    LLM-->>App: functionCall {id: c1, name: get_order, args: {order_id: "O1007"}}
+    Note over App: response.function_calls is not empty
     App->>App: run get_order("O1007")
-    App->>LLM: tool_result {tool_use_id: t1, content: "..."}
-    LLM-->>App: "Your order shipped on..."  (stop_reason = "end_turn")
+    App->>LLM: functionResponse {id: c1, name: get_order, response: {output: "..."}}
+    LLM-->>App: "Your order shipped on..."  (no function calls → done)
 ```
 
 **Rules that trip everyone up:**
-1. Append the assistant's reply **exactly as received** (`response.content`). It may contain thinking blocks that must be passed back.
-2. Every `tool_use` needs a `tool_result` with the same id, sent in the **next user message**.
-3. If the model makes several tool calls, return **all results in one message**.
-4. On failure, return the error text with `is_error: True`. Never drop a result.
+1. Append the model's turn **exactly as received** (`response.candidates[0].content`). With Gemini 3+ models it carries **thought signatures** that must be passed back, or the next request fails validation.
+2. Every function call needs a `function_response` with the same name (and `id`), sent in the **next user turn**.
+3. If the model makes several calls, return **all responses in one turn**.
+4. On failure, return the error as `{"error": "..."}`. Never drop a response.
 
-📖 Deep dive: 📘⭐ [Claude docs — Tool use overview](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview) · 📘 [Gemini — OpenAI-compatible function calling](https://ai.google.dev/gemini-api/docs/openai) (same idea, different wire format)
+📖 Deep dive: 📘⭐ [Gemini — Function calling](https://ai.google.dev/gemini-api/docs/generate-content/function-calling) · 📘 [Gemini — Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures) · 📘 [Gemini — Tools overview](https://ai.google.dev/gemini-api/docs/tools)
 
-### 2.2 Schemas, strict mode and structured outputs
+### 2.2 Schemas and structured outputs
 
-**Intuition.** The JSON Schema is the "type signature" the model fills in. **Strict mode** makes the API *guarantee* that the arguments match your schema: no missing fields, no wrong types. **Structured outputs** apply the same guarantee to the model's *final answer*.
+**Intuition.** The JSON Schema is the "type signature" the model fills in. A precise schema (types, enums, required fields, patterns) gets you valid arguments almost every time. Still validate them in code. **Structured output** (`response_schema`) constrains the model's *final answer* to your schema.
 
 ```python
-TOOLS = [{
-    "name": "get_order",
-    "description": ("Look up one order by its id (format 'O' + 4 digits, e.g. 'O1007'). "
-                    "Returns item, amount, status and dates. Use this before answering any order question."),
-    "strict": True,
-    "input_schema": {
+from google.genai import types
+
+GET_ORDER = types.FunctionDeclaration(
+    name="get_order",
+    description=("Look up one order by its id (format 'O' + 4 digits, e.g. 'O1007'). "
+                 "Returns item, amount, status and dates. Use this before answering any order question."),
+    parameters_json_schema={
         "type": "object",
         "properties": {"order_id": {"type": "string", "pattern": "^O\\d{4}$"}},
         "required": ["order_id"],
-        "additionalProperties": False,
     },
-}]
+)
+config = types.GenerateContentConfig(tools=[types.Tool(function_declarations=[GET_ORDER])])
 ```
 
 Structured final output with Pydantic, for example to classify a support ticket:
@@ -67,9 +68,10 @@ class Ticket(BaseModel):
     order_id: str | None
     urgency: Literal["low", "medium", "high"]
 
-r = client.messages.parse(model=CHEAP_MODEL, max_tokens=1000, output_format=Ticket,
-    messages=[{"role": "user", "content": "My watch from order O1012 stopped working!! need help asap"}])
-print(r.parsed_output)   # Ticket(category='warranty', order_id='O1012', urgency='high')
+r = client.models.generate_content(
+    model=CHEAP_MODEL, contents="My watch from order O1012 stopped working!! need help asap",
+    config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=Ticket))
+print(r.parsed)   # Ticket(category='warranty', order_id='O1012', urgency='high')
 ```
 
 **Trade-offs**
@@ -77,12 +79,12 @@ print(r.parsed_output)   # Ticket(category='warranty', order_id='O1012', urgency
 | Approach | Pros | Cons | Use when |
 |---|---|---|---|
 | Free text + "reply in JSON" prompt (2023 style) | Works everywhere | Breaks sometimes; needs parse/retry | Never, for new code |
-| Tool call with strict schema | Guaranteed valid args | Schema features are limited | Arguments to actions |
-| Structured output (`output_config.format` / `.parse`) | Guaranteed valid final JSON | Slightly fewer schema features | Extraction, classification, routing decisions |
+| Function call with a precise schema | Valid args almost always | Still validate in code | Arguments to actions |
+| Structured output (`response_schema` → `response.parsed`) | Schema-valid final JSON | Some JSON Schema features unsupported | Extraction, classification, routing decisions |
 
-> 💡 **Forcing a tool:** older models allowed `tool_choice={"type":"tool", ...}` to force a call. Newer models (Opus 5.5, Sonnet 5.5) reject forced tool choice. Use `auto` with a clear instruction, plus `strict: true`, or use structured outputs when you only want JSON back.
+> 💡 **Controlling tool use:** `tool_config=types.ToolConfig(function_calling_config=types.FunctionCallingConfig(mode="ANY"))` forces a function call (`"NONE"` forbids one; `"AUTO"` is the default). When you only want JSON back, prefer structured output over a forced call.
 
-📖 Deep dive: 📘 [Claude docs — Structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+📖 Deep dive: 📘 [Gemini API docs (JSON / structured output section)](https://ai.google.dev/gemini-api/docs)
 
 ### 2.3 Parallel tool calls
 
@@ -91,12 +93,14 @@ print(r.parsed_output)   # Ticket(category='warranty', order_id='O1012', urgency
 ```python
 import concurrent.futures as cf
 
-tool_calls = [b for b in response.content if b.type == "tool_use"]
+from course_utils import function_response
+
+calls = response.function_calls or []
 with cf.ThreadPoolExecutor() as pool:                      # run independent tools concurrently
-    outputs = list(pool.map(lambda b: run_tool(b.name, b.input), tool_calls))
-results = [{"type": "tool_result", "tool_use_id": b.id, "content": out, "is_error": err}
-           for b, (out, err) in zip(tool_calls, outputs)]
-messages.append({"role": "user", "content": results})       # ALL results in ONE message
+    outputs = list(pool.map(lambda fc: run_tool(fc.name, dict(fc.args)), calls))
+parts = [function_response(fc, out, is_error=err) for fc, (out, err) in zip(calls, outputs)]
+contents.append(response.candidates[0].content)            # model turn as received (thought signatures!)
+contents.append(types.Content(role="user", parts=parts))   # ALL responses in ONE turn
 ```
 
 **Lesson:** splitting parallel results across several messages quietly teaches the model to stop making parallel calls. Always return them together.
@@ -126,15 +130,15 @@ messages.append({"role": "user", "content": results})       # ALL results in ONE
 
 ### 🧪 Lab → do it in the practice notebook 2 — Tool design A/B test (30 min)
 1. Create two versions of an order lookup tool: (A) `get_all_orders()` dumping everything; (B) `search_orders(email, status)`.
-2. Ask 5 questions with each version. Record correctness, `input_tokens` and number of steps.
-3. Break the tool on purpose (raise an exception) and confirm that the `is_error` path lets the model recover.
-4. 🆓 Swap: repeat with Groq via `free_llm`. Do smaller models misuse tool A more often?
+2. Ask 5 questions with each version. Record correctness, `prompt_token_count` and number of steps.
+3. Break the tool on purpose (raise an exception) and confirm that the `{"error": ...}` response lets the model recover.
+4. Repeat with `CHEAP_MODEL` (Flash-Lite). Do smaller models misuse tool A more often?
 
 ### 🏗 Capstone — Day 2: `shopease/tools.py`
-Implement 4 task-shaped tools over SQLite: `get_customer_overview(email)`, `get_order(order_id)`, `search_orders(email, status)` and `check_refund_eligibility(order_id)`. The last one encodes the 30-day rule in **code**, not in the prompt. Rules that must always hold belong in code. Add `strict: True` schemas and actionable error messages, plus unit tests that call each tool directly (no LLM).
+Implement 4 task-shaped tools over SQLite: `get_customer_overview(email)`, `get_order(order_id)`, `search_orders(email, status)` and `check_refund_eligibility(order_id)`. The last one encodes the 30-day rule in **code**, not in the prompt. Rules that must always hold belong in code. Add precise JSON schemas and actionable error messages, plus unit tests that call each tool directly (no LLM).
 
 ### ✅ Checkpoint
-1. What happens if you send a `tool_result` without the matching `tool_use_id`?
+1. What happens if you drop the model's turn (with its thought signature) before sending a `function_response`?
 2. Why put the refund-eligibility rule in a tool instead of the system prompt?
 3. Give two ways a tool's *output* can hurt the agent even when it's correct.
 4. When would you use structured outputs instead of a tool call?

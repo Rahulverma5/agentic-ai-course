@@ -39,10 +39,13 @@ JUDGE_RUBRIC = ("Pass only if the reply is polite, concise, does not invent fact
 
 
 def judge(client, question: str, reply: str) -> Verdict:
-    r = client.messages.parse(model=config.CHEAP_MODEL, max_tokens=500, output_format=Verdict,
-                              messages=[{"role": "user", "content": f"Rubric: {JUDGE_RUBRIC}\n\nCustomer: {question}"
-                                                                    f"\n\nAgent reply: {reply}\n\nDoes the reply pass?"}])
-    return r.parsed_output
+    from google.genai import types
+
+    r = client.models.generate_content(
+        model=config.CHEAP_MODEL,
+        contents=f"Rubric: {JUDGE_RUBRIC}\n\nCustomer: {question}\n\nAgent reply: {reply}\n\nDoes the reply pass?",
+        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=Verdict))
+    return r.parsed
 
 
 def run_case(case: dict, client=None, use_judge: bool = False) -> dict:

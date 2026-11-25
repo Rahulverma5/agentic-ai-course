@@ -69,75 +69,84 @@ Accuracy
 Simple manual context editing:
 
 ```python
-def trim_old_tool_results(messages, keep_last=3, placeholder="[old tool result removed]"):
-    """Keep only the last `keep_last` tool results in full; shrink older ones."""
+def trim_old_tool_results(contents, keep_last=3, placeholder="[old tool result removed]"):
+    """Keep only the last `keep_last` function responses in full; shrink older ones (Gemini Content list)."""
     seen = 0
-    for msg in reversed(messages):
-        if msg["role"] == "user" and isinstance(msg["content"], list):
-            for block in msg["content"]:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
-                    seen += 1
-                    if seen > keep_last:
-                        block["content"] = placeholder
-    return messages
+    for content in reversed(contents):
+        for part in content.parts or []:
+            if part.function_response:
+                seen += 1
+                if seen > keep_last:
+                    part.function_response.response = {"output": placeholder}
+    return contents
 ```
 
-Server-side versions exist: **context editing** (`clear_tool_uses_20250919`) and **compaction** (`compact_20260112`):
+**Compaction by hand** (there's no server-side compaction in `generateContent`, so you summarize yourself): when the history gets long, ask a cheap model to summarize everything except the last few turns, then continue from `[summary] + recent turns`.
 
 ```python
-r = client.beta.messages.create(
-    betas=["compact-2026-01-12"], model=MODEL, max_tokens=16000, messages=messages,
-    context_management={"edits": [{"type": "compact_20260112"}]},   # summarizes when context gets large
-)
-messages.append({"role": "assistant", "content": r.content})       # keep the compaction block!
+def compact(contents, keep_recent=6):
+    if len(contents) <= keep_recent:
+        return contents
+    old, recent = contents[:-keep_recent], contents[-keep_recent:]
+    transcript = "\n".join(f"{c.role}: {''.join(p.text or '' for p in c.parts or [])}" for c in old)
+    summary = ask("Summarize this conversation for continuing it. Keep: decisions, facts from tools, "
+                  f"open tasks, file/order ids.\n\n{transcript}", model=CHEAP_MODEL)
+    return [user(f"[Summary of earlier conversation]\n{summary}")] + recent
 ```
 
-> ⚠️ **Editing history interacts with caching.** Any change to earlier messages invalidates the cache from that point on (5.4). Prefer to trim in big, rare batches, or use the server-side features, which are designed for this.
+> ⚠️ **Editing history interacts with caching.** Any change to earlier turns breaks the cached prefix from that point on (5.4). Trim or compact in big, rare batches, not a little every turn. Keep the cut on a clean boundary: never separate a function call from its response.
 
-📖 Deep dive: 📘 [Claude docs — Context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing) · 📘 [Claude docs — Compaction](https://platform.claude.com/docs/en/build-with-claude/compaction)
+📖 Deep dive: 📘 [Gemini — Optimization (caching, batch)](https://ai.google.dev/gemini-api/docs/optimization) · ⭐ [Anthropic — Effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) (provider-neutral)
 
 ### 5.4 Prompt caching: the biggest free win
 
 **Intuition.** Each loop step resends the same prefix (system + tools + history). Caching lets the provider store the processed prefix, so the next call **reads** it at a fraction of the price and much faster. It's a **prefix match**: change one byte early and everything after it is a miss.
 
 ```
-call 1: [system][tools][msg1][msg2]                   ← write cache (≈1.25× price)
-call 2: [system][tools][msg1][msg2][tool result]      ← prefix read from cache (≈0.05–0.1× price)
+call 1: [system][tools][msg1][msg2]                   ← full price (prefix becomes cacheable)
+call 2: [system][tools][msg1][msg2][tool result]      ← prefix served from cache (≈0.1× price)
                 └───────── cached ─────────┘ └ new ┘
 ```
 
-**Savings math.** Prefix of `P` tokens reused over `n` calls, base price `c` per token, write multiplier `w ≈ 1.25`, read multiplier `r` (Opus 5.5: $0.20 vs $4.00 ⇒ r = 0.05):
+**Gemini has two kinds:** **implicit caching** is automatic on current models: reuse an identical prefix above a minimum size and the matching tokens are billed at a discount (cache hits aren't guaranteed). **Explicit caching** (`client.caches.create(...)` with a TTL) guarantees reuse for a big shared prefix, plus a small per-hour storage fee.
+
+**Savings math.** Prefix of `P` tokens reused over `n` calls, base price `c` per token, write multiplier `w` (implicit: 1; providers with paid cache writes: ~1.25), read multiplier `r` (Gemini cached tokens: roughly 0.1):
 
 $$\text{no cache} = nPc \qquad \text{cache} = wPc + (n-1)\,rPc \qquad \text{saving} \approx 1 - \frac{w + (n-1)r}{n}$$
 
-For `n = 10`: saving ≈ 1 − (1.25 + 0.45)/10 = **83%** on the prefix tokens. Latency to first token also drops a lot for long prefixes.
+For `n = 10`, `w = 1`, `r = 0.1`: saving ≈ 1 − (1 + 0.9)/10 = **81%** on the prefix tokens. Latency to first token also drops for long prefixes.
 
 ```python
-r = client.messages.create(
-    model=MODEL, max_tokens=16000, tools=TOOLS, messages=messages,
-    system=SYSTEM_PROMPT,
-    cache_control={"type": "ephemeral"},       # automatic: caches up to the last cacheable block
-)
-print(r.usage.cache_creation_input_tokens, r.usage.cache_read_input_tokens, r.usage.input_tokens)
+# Implicit caching: nothing to configure. Keep the prefix (system instruction + tools + early turns) identical.
+config = types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT, tools=to_gemini_tools(TOOLS))
+r = client.models.generate_content(model=MODEL, contents=contents, config=config)
+print(r.usage_metadata.prompt_token_count, r.usage_metadata.cached_content_token_count)
+
+# Explicit caching: create once with a TTL, reference it by name, delete when done.
+cache = client.caches.create(model=MODEL, config=types.CreateCachedContentConfig(
+    system_instruction=BIG_POLICY_MANUAL, ttl="600s"))
+r = client.models.generate_content(model=MODEL, contents="What's the return window?",
+                                   config=types.GenerateContentConfig(cached_content=cache.name))
+client.caches.delete(name=cache.name)
 ```
 
 **Silent cache killers (very common in real codebases):**
 - `datetime.now()` or a request id in the system prompt → put volatile data **at the end**.
 - Tools in random order or `json.dumps` without `sort_keys` → make them deterministic.
 - Swapping tool sets per request → keep one stable tool list.
-- Prompts shorter than the model's minimum cacheable length → silently not cached.
+- Prefixes shorter than the model's minimum cacheable size → silently not cached.
 
 | ✅ Do | ❌ Don't |
 |---|---|
 | Stable system + tools first, conversation after | Timestamps at the top |
 | Append-only history | Rewriting old messages every turn |
-| Check `cache_read_input_tokens > 0` in logs | Assume caching works |
+| Check `cached_content_token_count > 0` in logs | Assume caching works |
 
-📖 Deep dive: 📘⭐ [Claude docs — Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+📖 Deep dive: 📘⭐ [Gemini — Optimization: implicit & explicit caching](https://ai.google.dev/gemini-api/docs/optimization) · 📘 [Gemini pricing (cached-token prices)](https://ai.google.dev/gemini-api/docs/pricing)
 
 ### 🧪 Lab → do it in the practice notebook 5 — Measure it (30 min)
-1. Run a 10-step agent conversation **without** caching, then **with** it. Plot input cost per step for both runs.
-2. Add `datetime.now()` to the system prompt and watch `cache_read_input_tokens` drop to 0.
+1. Run a 5-turn conversation with a long, stable system instruction and watch `cached_content_token_count` per turn (implicit caching). Then try an explicit cache.
+2. Add `datetime.now()` to the start of the system instruction and watch `cached_content_token_count` drop to 0.
 3. Put a key fact in the middle of a 50k-token filler document vs at the end, and ask about it 5 times each. Do you see any difference?
 
 ### 🏗 Capstone — Day 5
@@ -147,7 +156,7 @@ Restructure the ShopEase prompt (stable sections, volatile data last), enable ca
 1. Why does adding the current time to the system prompt cost money?
 2. Calculate the cache saving for a 20-call session with r = 0.1.
 3. When would you choose compaction instead of context editing?
-4. What's "just-in-time" context, and how does Claude Code use it for codebases?
+4. What's "just-in-time" context, and how do coding agents (Gemini CLI, Claude Code) use it for codebases?
 
 ---
 

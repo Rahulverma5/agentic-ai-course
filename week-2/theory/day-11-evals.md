@@ -43,8 +43,8 @@ Prefer grading **outcomes and key safety-relevant steps**. Grading the *exact* p
 
 ```python
 def grade_case(case, transcript, final_text):
-    tools_called = [b.name for m in transcript if m["role"] == "assistant"
-                    for b in m["content"] if getattr(b, "type", "") == "tool_use"]
+    tools_called = [p.function_call.name for c in transcript if c.role == "model"
+                    for p in c.parts or [] if p.function_call]             # transcript = list of Content
     checks = {
         "used_eligibility_tool": "check_refund_eligibility" in tools_called,
         "mentions_order":        case["order_id"] in final_text,
@@ -65,10 +65,11 @@ class Verdict(BaseModel):
     reason: str
 
 def judge(question, reply, rubric):
-    r = client.messages.parse(model=CHEAP_MODEL, max_tokens=800, output_format=Verdict,
-        messages=[{"role": "user", "content": f"Rubric: {rubric}\n\nCustomer: {question}\n\nAgent reply: {reply}\n\n"
-                                              "Does the reply satisfy the rubric?"}])
-    return r.parsed_output
+    r = client.models.generate_content(
+        model=CHEAP_MODEL,
+        contents=f"Rubric: {rubric}\n\nCustomer: {question}\n\nAgent reply: {reply}\n\nDoes the reply satisfy the rubric?",
+        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=Verdict))
+    return r.parsed
 ```
 
 ### 11.4 The math: pass@k vs pass^k (reliability)
@@ -104,7 +105,7 @@ print(pass_at_k(0.9, 5), pass_hat_k(0.9, 5))    # 0.99999  0.59049
 📖 Deep dive: ⭐ [Anthropic — Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) · ⭐ [Hamel Husain — Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/) · [Hamel Husain — Creating an LLM-as-a-Judge that drives results](https://hamel.dev/blog/posts/llm-judge/) · 📄 [τ-bench (2024)](https://arxiv.org/abs/2406.12045) · 🧑‍💻 [DeepLearning.AI — Evaluating AI Agents](https://www.deeplearning.ai/courses/evaluating-ai-agents)
 
 ### 🧪 Lab → do it in the practice notebook 11 — Calibrate a judge (30 min)
-Label 30 saved transcripts yourself (pass/fail + reason). Run the Haiku judge on them and compute agreement and a confusion matrix. Improve the rubric twice and plot agreement per version.
+Label 30 saved transcripts yourself (pass/fail + reason). Run the `CHEAP_MODEL` judge on them and compute agreement and a confusion matrix. Improve the rubric twice and plot agreement per version.
 
 ### 🏗 Capstone — Day 11: `evals/`
 - `cases.jsonl`: 20 cases (8 order status, 5 refund edge cases, 3 RAG policy questions, 2 memory, 2 adversarial), each with `input`, `customer_id`, expectations and a `critical` flag.

@@ -2,7 +2,9 @@
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Rahulverma5/agentic-ai-course?quickstart=1)
 
-A hands-on course for building AI agents the way production teams do today. It balances **theory** (how each method evolved, its trade-offs, when to use it) with **practice** (notebooks that run on a free 2-core Codespace) and one **capstone project** that grows every day.
+A hands-on course for building AI agents the way production teams do today. All code runs on the **Gemini API** (official `google-genai` SDK) and works on the free tier. It balances **theory** (how each method evolved, its trade-offs, when to use it) with **practice** (notebooks that run on a free 2-core Codespace) and one **capstone project** that grows every day.
+
+> **Note:** `SYLLABUS.md` is the original all-in-one syllabus and keeps its first code snippets as conceptual references. The day-wise theory notes, notebooks and projects all use Gemini.
 
 ## Repository layout
 
@@ -22,7 +24,7 @@ agentic-ai-course/
 ```
 
 ## Quick start (GitHub Codespaces)
-1. Add `ANTHROPIC_API_KEY` as a Codespaces secret: GitHub → Settings → Codespaces → Secrets. Optional free alternatives are `GEMINI_API_KEY` and `GROQ_API_KEY`.
+1. Get a free **Gemini API key** at [Google AI Studio](https://aistudio.google.com/apikey), then add it as a Codespaces secret named `GEMINI_API_KEY`: GitHub → Settings → Codespaces → Secrets.
 2. Click **Open in GitHub Codespaces** above and choose the **2-core** machine.
 3. Open [`week-1/theory/day-01-what-is-an-agent.md`](week-1/theory/day-01-what-is-an-agent.md), then [`week-1/practice/day-01-tokens-and-cost.ipynb`](week-1/practice/day-01-tokens-and-cost.ipynb).
 

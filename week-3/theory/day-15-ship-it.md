@@ -20,9 +20,10 @@
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import anthropic
+from google import genai
+from google.genai import types
 
-app, client = FastAPI(), anthropic.Anthropic()
+app, client = FastAPI(), genai.Client()   # reads GEMINI_API_KEY
 
 class ChatIn(BaseModel):
     conversation_id: str
@@ -30,36 +31,41 @@ class ChatIn(BaseModel):
 
 @app.post("/chat")
 def chat(body: ChatIn):
-    messages = load_history(body.conversation_id) + [{"role": "user", "content": body.message}]
+    contents = load_history(body.conversation_id) + [
+        types.Content(role="user", parts=[types.Part.from_text(text=body.message)])]
     def events():
-        for chunk in run_agent_streaming(messages):          # yields text deltas and status lines
+        for chunk in run_agent_streaming(contents):          # yields text deltas and status lines
             yield f"data: {chunk}\n\n"                       # Server-Sent Events
-        save_history(body.conversation_id, messages)
+        save_history(body.conversation_id, contents)
     return StreamingResponse(events(), media_type="text/event-stream")
 ```
 
 Inside `run_agent_streaming`, stream each model turn and yield status lines during tools:
 
 ```python
-def run_agent_streaming(messages):
+CONFIG = types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT, tools=to_gemini_tools(TOOLS))
+
+def run_agent_streaming(contents):
     for _ in range(MAX_STEPS):
-        with client.messages.stream(model=MODEL, max_tokens=16000, system=SYSTEM_PROMPT,
-                                    tools=TOOLS, messages=messages) as stream:
-            for text in stream.text_stream:
-                yield text
-            r = stream.get_final_message()
-        messages.append({"role": "assistant", "content": r.content})
-        if r.stop_reason != "tool_use":
+        parts = []
+        for chunk in client.models.generate_content_stream(model=MODEL, contents=contents, config=CONFIG):
+            for p in chunk.candidates[0].content.parts or []:
+                parts.append(p)                              # keep every part (thought signatures!)
+                if p.text and not p.thought:
+                    yield p.text
+        contents.append(types.Content(role="model", parts=parts))
+        calls = [p.function_call for p in parts if p.function_call]
+        if not calls:
             return
-        results = []
-        for b in (b for b in r.content if b.type == "tool_use"):
-            yield f"[checking: {b.name}]"
-            out, err = run_tool(b.name, b.input)
-            results.append({"type": "tool_result", "tool_use_id": b.id, "content": out, "is_error": err})
-        messages.append({"role": "user", "content": results})
+        responses = []
+        for fc in calls:
+            yield f"[checking: {fc.name}]"
+            out, err = run_tool(fc.name, dict(fc.args))
+            responses.append(function_response(fc, out, is_error=err))
+        contents.append(types.Content(role="user", parts=responses))
 ```
 
-Run it in Colab with `uvicorn` in a background thread and test with `httpx`, or deploy for free on a small container platform. Store history in SQLite/Redis keyed by `conversation_id`, never in process memory, so the API scales and survives restarts.
+Run it in Codespaces with `uvicorn` (port 8000 is forwarded) or in a notebook background thread, test with `httpx`, or deploy for free on a small container platform. Store history in SQLite/Redis keyed by `conversation_id`, never in process memory, so the API scales and survives restarts.
 
 ### 15.2 Production readiness checklist
 

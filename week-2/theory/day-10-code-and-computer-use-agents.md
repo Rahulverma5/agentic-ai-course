@@ -68,17 +68,20 @@ def run_python(code: str) -> str:
         return "Error: timed out after 10s"
 ```
 
-Hosted alternative, Claude's server-side **code execution tool** (Anthropic runs the sandbox):
+Hosted alternative, Gemini's built-in **code execution tool** (Google runs the sandbox):
 
 ```python
-r = client.messages.create(model=MODEL, max_tokens=16000,
-    tools=[{"type": "code_execution_20260521", "name": "code_execution"}],
-    messages=[{"role": "user", "content": "Simulate 10,000 dice rolls and give the mean and a histogram summary."}])
+r = client.models.generate_content(
+    model=MODEL, contents="Simulate 10,000 dice rolls and give the mean and a histogram summary.",
+    config=types.GenerateContentConfig(tools=[types.Tool(code_execution=types.ToolCodeExecution())]))
+for p in r.candidates[0].content.parts:
+    if p.executable_code:       print("code:", p.executable_code.code)
+    if p.code_execution_result: print("result:", p.code_execution_result.output)
 ```
 
 **Programmatic tool calling:** the model writes code *inside* the code-execution sandbox that calls **your** tools. Many tool calls run without each result passing through the context, which is the same idea as 8.4.
 
-📖 Deep dive: 📘 [Claude docs — Code execution tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/code-execution-tool)
+📖 Deep dive: 📘 [Gemini — Tools overview (code execution, search, URL context)](https://ai.google.dev/gemini-api/docs/tools)
 
 ### 10.3 Computer-use and browser agents (overview)
 
@@ -91,7 +94,7 @@ r = client.messages.create(model=MODEL, max_tokens=16000,
 
 **Rule:** API > CLI > browser automation (Playwright scripts) > computer use. Use computer use only when nothing above it is available. Benchmarks such as OSWorld track progress.
 
-📖 Deep dive: 📘 [Claude docs — Computer use tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool) · [OSWorld benchmark](https://os-world.github.io/)
+📖 Deep dive: 📘 [Gemini — Tools overview (incl. computer use)](https://ai.google.dev/gemini-api/docs/tools) · [OSWorld benchmark](https://os-world.github.io/)
 
 ### 🧪 Lab → do it in the practice notebook 10 — Data-analysis agent (45 min)
 Give an agent a single `run_python` tool plus a CSV export of the orders table (add 500 synthetic rows). Ask 5 analytics questions ("refund rate by item", "plot monthly revenue", ...). Compare against an agent with only JSON tools (`get_order`, `search_orders`) on the same questions: steps, tokens, correctness. Then try the hosted code-execution tool.

@@ -28,12 +28,12 @@ flowchart LR
 
 ```python
 def chain(ticket):
-    summary = ask(CHEAP_MODEL, f"Summarize this ticket in 2 lines:\n{ticket}")
+    summary = ask(f"Summarize this ticket in 2 lines:\n{ticket}", model=CHEAP_MODEL)
     if len(summary) > 400:                               # gate (plain code)
-        summary = ask(CHEAP_MODEL, f"Shorten to 2 lines:\n{summary}")
-    return ask(MODEL, f"Write a polite reply based on this summary:\n{summary}")
+        summary = ask(f"Shorten to 2 lines:\n{summary}", model=CHEAP_MODEL)
+    return ask(f"Write a polite reply based on this summary:\n{summary}", model=MODEL)
 ```
-*(`ask(model, prompt)` is a one-line helper: `client.messages.create(...)` → return the text.)*
+*(`ask(prompt, model=...)` is a one-line helper from `course_utils`: `client.models.generate_content(...)` → return the text.)*
 
 - **Trade-off:** more calls (latency), but each one is easier, so accuracy is higher.
 - **Use when:** the task splits cleanly into fixed steps (draft → check → translate).
@@ -45,8 +45,8 @@ def chain(ticket):
 ```mermaid
 flowchart LR
     Q[Customer message] --> C{Classifier<br/>cheap model}
-    C -->|faq| F[RAG answer<br/>Haiku, effort low]
-    C -->|order issue| A[Support agent<br/>Opus, tools]
+    C -->|faq| F[RAG answer<br/>Flash-Lite, low thinking]
+    C -->|order issue| A[Support agent<br/>Flash, tools]
     C -->|angry / legal| H[Human queue]
 ```
 
@@ -58,10 +58,10 @@ class Route(BaseModel):
     reason: str
 
 def route(msg):
-    r = client.messages.parse(model=CHEAP_MODEL, max_tokens=500, output_format=Route,
-        system="Classify ShopEase support messages. 'human' = legal threats, abuse, or explicit request for a person.",
-        messages=[{"role": "user", "content": msg}])
-    return r.parsed_output
+    r = client.models.generate_content(model=CHEAP_MODEL, contents=msg, config=types.GenerateContentConfig(
+        system_instruction="Classify ShopEase support messages. 'human' = legal threats, abuse, or explicit request for a person.",
+        response_mime_type="application/json", response_schema=Route))
+    return r.parsed
 ```
 
 - **Trade-off:** misroutes become a new failure mode, so you need an eval on the router itself.
@@ -78,7 +78,7 @@ checks = {"tone":   "Is this reply polite? yes/no",
           "pii":    "Does this reply reveal another customer's data? yes/no"}
 def review(reply):
     with cf.ThreadPoolExecutor() as pool:                       # sectioning: 3 checks at once
-        futs = {k: pool.submit(ask, CHEAP_MODEL, f"{q}\n\nReply:\n{reply}") for k, q in checks.items()}
+        futs = {k: pool.submit(ask, f"{q}\n\nReply:\n{reply}", model=CHEAP_MODEL) for k, q in checks.items()}
     return {k: f.result() for k, f in futs.items()}
 ```
 
@@ -111,13 +111,13 @@ flowchart TB
 
 ```python
 def write_with_review(task, max_rounds=3):
-    draft = ask(MODEL, task)
+    draft = ask(task, model=MODEL)
     for _ in range(max_rounds):
-        verdict = ask(CHEAP_MODEL, f"Criteria: polite, <120 words, cites the policy.\n"
-                                   f"Reply PASS or a list of fixes.\n\nDraft:\n{draft}")
+        verdict = ask(f"Criteria: polite, <120 words, cites the policy.\n"
+                                   f"Reply PASS or a list of fixes.\n\nDraft:\n{draft}", model=CHEAP_MODEL)
         if verdict.strip().startswith("PASS"):
             break
-        draft = ask(MODEL, f"Revise the draft using this feedback:\n{verdict}\n\nDraft:\n{draft}")
+        draft = ask(f"Revise the draft using this feedback:\n{verdict}\n\nDraft:\n{draft}", model=MODEL)
     return draft
 ```
 
@@ -145,7 +145,7 @@ def write_with_review(task, max_rounds=3):
 Implement chaining, routing and evaluator–optimizer on 10 sample tickets. For each pattern, log latency, cost and your own 1–5 quality score in a pandas DataFrame and plot cost vs quality.
 
 ### 🏗 Capstone — Day 4: `shopease/router.py`
-Router (Haiku + structured output) → `faq` path (one call over the policy text for now; RAG on Day 6), `order_issue` path (your Day 3 agent) or `human` path (a stub queue). Measure how much traffic avoids the expensive agent across 30 synthetic messages, and estimate the money saved.
+Router (Flash-Lite + structured output) → `faq` path (one call over the policy text for now; RAG on Day 6), `order_issue` path (your Day 3 agent) or `human` path (a stub queue). Measure how much traffic avoids the expensive agent across 30 synthetic messages, and estimate the money saved.
 
 ### ✅ Checkpoint
 1. What is the difference between parallelization and orchestrator–workers?

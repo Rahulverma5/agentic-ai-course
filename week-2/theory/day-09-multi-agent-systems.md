@@ -42,7 +42,7 @@ flowchart TB
 
 | Anthropic: multi-agent research system | Cognition: "Don't build multi-agents" |
 |---|---|
-| A lead agent with parallel subagents beat a single agent by a large margin on their internal research eval | Parallel agents make **conflicting decisions** when they work on shared artifacts (code), because each lacks the others' context |
+| A lead agent (Claude Opus 4) with parallel Sonnet 4 subagents beat a single agent by a large margin on Anthropic's internal research eval | Parallel agents make **conflicting decisions** when they work on shared artifacts (code), because each lacks the others' context |
 | Works because research is **breadth-first and read-only**: subtasks are independent | Recommends a **single-threaded** agent with excellent context management for coding |
 | Cost: multi-agent used ~15× the tokens of a chat (single agents ~4×) | Their later post says what works is narrower: many agents contribute *intelligence*, but **writes stay single-threaded** |
 
@@ -66,13 +66,13 @@ flowchart TB
 
 **Lessons from Anthropic's research system (apply these to any subagent design):**
 1. **Teach the lead to delegate:** each subtask needs an objective, output format, tools to use and clear boundaries. Vague delegation leads to duplicated work.
-2. **Scale effort to complexity:** 1 subagent for simple facts, many only for broad questions. Put that rule in the prompt.
+2. **Scale the work to the question:** 1 subagent for simple facts, many only for broad questions. Put that rule in the prompt.
 3. **Subagents return compressed results**, or write them to files and return references.
-4. **Use a cheaper model for subagents** (Haiku/Sonnet) and the strong one for the lead.
+4. **Use a cheaper model for subagents** (e.g. Flash-Lite) and the stronger one for the lead (e.g. Flash/Pro).
 5. **Observability is mandatory.** Multi-agent bugs are emergent, so trace everything (Day 13).
 
 ### 🧪 Lab → do it in the practice notebook 9 — Single vs multi-agent research (45 min)
-Task: *"Compare ShopEase's return policy with 3 typical e-commerce return policies and list the gaps"* (use the policy docs plus 3 synthetic competitor docs). Build (A) a single agent and (B) a lead + 3 parallel subagents (Haiku, `ThreadPoolExecutor`). Compare quality (your rubric), tokens, cost and wall time. Fill in a table and write 3 bullet conclusions.
+Task: *"Compare ShopEase's return policy with 3 typical e-commerce return policies and list the gaps"* (use the policy docs plus 3 synthetic competitor docs). Build (A) a single agent and (B) a lead + 3 parallel subagents (`CHEAP_MODEL`, `ThreadPoolExecutor`). Compare quality (your rubric), tokens, cost and wall time. Fill in a table and write 3 bullet conclusions.
 
 ### 🏗 Capstone — Day 9
 Add an **escalation investigator** subagent: for complex complaints ("3 orders, two late, one wrong item"), the main agent delegates a read-only investigation and gets back a structured case summary. The main agent remains the **only writer**: it alone talks to the customer and triggers refunds.

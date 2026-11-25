@@ -6,7 +6,7 @@ A customer-support agent for **ShopEase**, a fictional online store. You build i
 flowchart LR
     U[Customer] -->|POST /chat SSE| API[app.py<br/>FastAPI]
     API --> G1[mask_pii]
-    G1 --> R{router.py<br/>Haiku + structured output}
+    G1 --> R{router.py<br/>Flash-Lite + structured output}
     R -->|faq| F[answer_faq<br/>hybrid RAG]
     R -->|human| H[handoff]
     R -->|order_issue| A[agent.py<br/>agent loop]
@@ -26,9 +26,9 @@ flowchart LR
 # from the repo root (Codespaces does the first line for you)
 pip install -r requirements.txt && pip install -e . && python -m shopease.data
 
-python -m pytest                                   # 16 tests, no API key needed (scripted fake client)
+python -m pytest                                   # 16 tests, no API key needed (scripted fake Gemini client)
 cd projects/shopease-support-agent
-python evals/run_evals.py                          # 20 eval cases against the real model (needs a key)
+python evals/run_evals.py                          # 20 eval cases against Gemini (needs GEMINI_API_KEY)
 uvicorn app:app --port 8000                        # streaming API
 ```
 
@@ -47,7 +47,7 @@ print(agent.tracker.summary())
 |---|---|---|
 | `shopease/data.py` | Deterministic SQLite data + policy docs, including hand-written edge-case orders | 1 |
 | `shopease/tools.py` | 8 task-shaped tools, strict schemas, ownership checks in SQL, idempotent refunds, approval gate | 2, 12 |
-| `shopease/agent.py` | Agent loop: cached system prompt, effort, budgets, repeat detection, streaming events, output guard | 3, 5, 13 |
+| `shopease/agent.py` | Gemini agent loop: stable system instruction (implicit caching), thinking level, budgets, repeat detection, streaming events, output guard | 3, 5, 13 |
 | `shopease/router.py` | Triage (faq / order_issue / human) with a keyword fallback; FAQ answers via RAG | 4, 6 |
 | `shopease/rag.py` | Section chunking, BM25 + fastembed vectors, RRF fusion, optional cross-encoder rerank | 6 |
 | `shopease/memory.py` | Per-customer facts, write policy (no PII, entitlement claims flagged), forget() | 7 |
@@ -56,7 +56,7 @@ print(agent.tracker.summary())
 | `shopease/tracing.py` | Minimal span tracer → JSONL (swap for OpenTelemetry/Langfuse) | 13 |
 | `evals/` | 20 cases (8 critical), code graders, optional LLM judge, pass^k, report, CI exit code | 11 |
 | `app.py` | FastAPI Server-Sent Events endpoint | 15 |
-| `tests/` | Unit + integration tests with a scripted fake Claude client | all |
+| `tests/` | Unit + integration tests with a scripted fake Gemini client | all |
 
 ## Milestones (build your own version alongside the course)
 

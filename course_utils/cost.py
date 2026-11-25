@@ -1,14 +1,28 @@
-"""Track tokens and dollars for every call. Prices are approximate: check the pricing page."""
+"""Track tokens and (estimated) dollars for every Gemini call.
+
+On the free tier you pay $0. The tracker still shows what the same usage would cost at paid prices,
+so you learn to reason about cost. Prices below are APPROXIMATE and change often: check
+https://ai.google.dev/gemini-api/docs/pricing and adjust PRICES (or add your pinned model ids).
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# $ per 1M tokens: (input, output, cache_read). Cache writes ≈ 1.25 × input (5-minute cache).
+# $ per 1M tokens: (input, output incl. thinking, cached input)
 PRICES = {
-    "claude-opus-5-5": (4.00, 20.00, 0.20),
-    "claude-haiku-5-5": (0.10, 0.50, 0.01),  # ≤100K-token prompts; check the pricing page
+    "gemini-flash-latest": (1.50, 7.50, 0.15),
+    "gemini-flash-lite-latest": (0.30, 2.50, 0.03),
 }
-CACHE_WRITE_MULTIPLIER = 1.25
+
+
+def _price(model: str):
+    if model in PRICES:
+        return PRICES[model]
+    if "lite" in model:
+        return PRICES["gemini-flash-lite-latest"]
+    if "flash" in model:
+        return PRICES["gemini-flash-latest"]
+    return (0.0, 0.0, 0.0)
 
 
 @dataclass
@@ -16,18 +30,14 @@ class CostTracker:
     calls: list = field(default_factory=list)
 
     def add(self, model: str, usage, label: str = "") -> float:
-        """Record one response's usage. Returns that call's cost in $."""
-        price_in, price_out, price_cache = PRICES.get(model, (0.0, 0.0, 0.0))
-        g = lambda name: getattr(usage, name, 0) or 0  # noqa: E731
-        cost = (g("input_tokens") * price_in
-                + g("cache_creation_input_tokens") * price_in * CACHE_WRITE_MULTIPLIER
-                + g("cache_read_input_tokens") * price_cache
-                + g("output_tokens") * price_out) / 1e6
-        self.calls.append({
-            "label": label, "model": model, "input": g("input_tokens"), "output": g("output_tokens"),
-            "cache_write": g("cache_creation_input_tokens"), "cache_read": g("cache_read_input_tokens"),
-            "cost": cost,
-        })
+        """Record one response's usage_metadata. Returns the estimated cost in $."""
+        g = lambda name: (getattr(usage, name, 0) or 0) if usage else 0  # noqa: E731
+        prompt, cached = g("prompt_token_count"), g("cached_content_token_count")
+        output, thoughts = g("candidates_token_count"), g("thoughts_token_count")
+        price_in, price_out, price_cache = _price(model)
+        cost = ((prompt - cached) * price_in + cached * price_cache + (output + thoughts) * price_out) / 1e6
+        self.calls.append({"label": label, "model": model, "input": prompt, "cached": cached,
+                           "output": output, "thinking": thoughts, "cost": cost})
         return cost
 
     def total(self) -> float:
@@ -35,9 +45,11 @@ class CostTracker:
 
     def summary(self) -> str:
         n = len(self.calls)
-        inp = sum(c["input"] + c["cache_read"] + c["cache_write"] for c in self.calls)
-        out = sum(c["output"] for c in self.calls)
-        return f"{n} calls · {inp:,} input tokens · {out:,} output tokens · ${self.total():.4f}"
+        inp = sum(c["input"] for c in self.calls)
+        cached = sum(c["cached"] for c in self.calls)
+        out = sum(c["output"] + c["thinking"] for c in self.calls)
+        return (f"{n} calls · {inp:,} input tokens ({cached:,} cached) · {out:,} output+thinking tokens · "
+                f"≈${self.total():.4f} at paid prices ($0 on the free tier)")
 
     def to_dataframe(self):
         import pandas as pd

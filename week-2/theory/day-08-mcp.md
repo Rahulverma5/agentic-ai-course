@@ -82,16 +82,17 @@ async def main():
     params = StdioServerParameters(command=sys.executable, args=["orders_server.py"])
     async with Client(params) as mcp_client:                     # starts the server and handshakes
         listed = await mcp_client.list_tools()
-        claude_tools = [{"name": t.name, "description": t.description, "input_schema": t.input_schema}
-                        for t in listed.tools]                       # MCP → Claude tool format
+        tools = [{"name": t.name, "description": t.description, "input_schema": t.input_schema}
+                 for t in listed.tools]                              # MCP → course tool dict
+        gemini_tools = to_gemini_tools(tools)                        # → Gemini FunctionDeclarations
         result = await mcp_client.call_tool("get_order", {"order_id": "O1007"})
-        print(claude_tools[0]["name"], "→", result.content[0].text, "| error:", result.is_error)
+        print(tools[0]["name"], "→", result.content[0].text, "| error:", result.is_error)
         # In run_agent: when the model calls a tool, route it to mcp_client.call_tool(...)
 
 asyncio.run(main())   # in Jupyter use: await main()
 ```
 
-The Claude API also has an **MCP connector**: pass a remote server URL and the API calls the tools for you, with no client code. It's convenient for public HTTP servers. The local client gives you full control (logging, approvals) and works with stdio servers.
+The **google-genai SDK can also take an MCP client session directly as a tool** (it lists and calls the tools for you), and several hosted APIs offer server-side MCP connectors for public HTTP servers. Wiring it by hand, as above, gives you full control: logging, approvals, and filtering which tools the model sees.
 
 ### 8.4 Scaling MCP: the "tool tax" and code execution
 
