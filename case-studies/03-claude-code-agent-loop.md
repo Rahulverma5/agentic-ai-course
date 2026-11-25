@@ -2,6 +2,8 @@
 
 **Sources:** [How the agent loop works (Claude Agent SDK docs)](https://code.claude.com/docs/en/agent-sdk/agent-loop) · [Building agents with the Claude Agent SDK](https://claude.com/blog/building-agents-with-the-claude-agent-sdk) · [Claude Code best practices](https://code.claude.com/docs/en/best-practices) · [Effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
 
+> 🔎 **Deep dive:** this is the short version. The full 4-part guide is in [claude-code/](claude-code/README.md).
+
 ## TL;DR
 One of the most capable agents in production is built on the loop you wrote on Day 3: **gather context → take action → verify → repeat**. What makes it strong isn't orchestration complexity. It's **general-purpose tools** (files, search, bash), **context management** (just-in-time retrieval, compaction, subagents), **verification** (tests, linters) and **permissions/hooks** for safety. The same harness is available as a library, the Claude Agent SDK.
 
@@ -33,7 +35,7 @@ flowchart LR
 
 ## Practices from the best-practices guide worth copying
 - Give the agent a way to **verify its work** (tests, screenshots, expected outputs). It's the single biggest quality lever.
-- For complex work: **explore → plan → implement → verify**, rather than "just do it".
+- **Tell Claude what it can't see:** name the file, describe the symptom, say what "fixed" looks like; for fuzzy tasks, have it interview you and write a spec first (then use plan mode).
 - Use a Markdown checklist / scratchpad for multi-step tasks.
 - Run headless (`claude -p`) for automation and CI.
 
