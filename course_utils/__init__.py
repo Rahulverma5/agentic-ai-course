@@ -5,7 +5,8 @@ these helpers so the cells can focus on the new idea of the day.
 
     from course_utils import client, MODEL, CHEAP_MODEL, ask, tracker, run_agent
 """
-from .llm import MODEL, CHEAP_MODEL, REPO_ROOT, check_setup, get_client, ask, text_of, thinking, user
+from .llm import (MODEL, CHEAP_MODEL, REPO_ROOT, check_setup, resolve_models, available_models, get_client, ask,
+                  text_of, thinking, user)
 from .cost import CostTracker, tracker, PRICES
 from .loop import run_agent, AgentResult, to_gemini_tools, function_response
 
@@ -20,6 +21,6 @@ class _LazyClient:
 client = _LazyClient()
 
 __all__ = [
-    "MODEL", "CHEAP_MODEL", "REPO_ROOT", "check_setup", "get_client", "client", "ask", "text_of", "thinking",
+    "MODEL", "CHEAP_MODEL", "REPO_ROOT", "check_setup", "resolve_models", "available_models", "get_client", "client", "ask", "text_of", "thinking",
     "user", "CostTracker", "tracker", "PRICES", "run_agent", "AgentResult", "to_gemini_tools", "function_response",
 ]

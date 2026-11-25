@@ -60,12 +60,12 @@ def _content(role: str, text: str):
 
 
 class SupportAgent:
-    def __init__(self, customer_id: str, client=None, model: str = config.MODEL, thinking_level: str | None = None,
+    def __init__(self, customer_id: str, client=None, model: str | None = None, thinking_level: str | None = None,
                  approve: Callable[[str, dict], bool] | None = None, use_router: bool = True,
                  max_steps: int = 10, max_cost: float = 0.50, conversation_id: str | None = None,
                  tracer: Tracer | None = None, stream: bool = False):
         self.session = Session(customer_id, conversation_id or uuid.uuid4().hex[:10], approve)
-        self._client, self.model, self.thinking_level = client, model, thinking_level
+        self._client, self.model, self.thinking_level = client, model or config.MODEL, thinking_level
         self.use_router, self.max_steps, self.max_cost, self.stream = use_router, max_steps, max_cost, stream
         self.tracer = tracer or Tracer(enabled=False)
         self.tracker = CostTracker()

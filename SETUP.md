@@ -50,7 +50,7 @@ Each notebook's first cell detects Colab/Kaggle and clones + installs the repo a
 | `COURSE_MODEL` | `gemini-flash-latest` | Agents and harder reasoning |
 | `COURSE_CHEAP_MODEL` | `gemini-flash-lite-latest` | Bulk work: routers, judges, summaries, subagents |
 
-- The defaults are **Google-maintained aliases** that always point at the current Flash / Flash-Lite release. To pin exact model ids (recommended for reproducible evals), set the env vars, e.g. in `.env`: `COURSE_MODEL=<model id from the models page>`.
+- The defaults are **Google-maintained aliases** that point at the current Flash / Flash-Lite release. Because availability differs by account, `check_setup()` (first cell of every notebook) **lists the models your key can use** and switches to the best available Flash / Flash-Lite if a default isn't there. To pin exact model ids (recommended for reproducible evals), set the env vars, e.g. in `.env`: `COURSE_MODEL=<model id from the models page>`.
 - **Free tier = $0**, but with **rate limits** (requests per minute and per day, per project). They change over time, and Pro models may not be on the free tier at all. Check **AI Studio → Usage / Rate limits** for your current numbers (and the rate-limits page in the [Gemini API docs](https://ai.google.dev/gemini-api/docs)).
 - The course client **retries automatically** on `429` (rate limited) and `5xx` with exponential backoff, so a cell may pause for a while. That's expected on the free tier.
 - If you hit the **daily** limit on Flash, switch the agent model to Flash-Lite for the day: `COURSE_MODEL=gemini-flash-lite-latest`. Or enable billing on the project (paid tier: much higher limits, pay per token).
@@ -64,7 +64,7 @@ The course uses `client.models.generate_content` from the official `google-genai
 |---|---|
 | `GEMINI_API_KEY is not set` | Add the Codespaces secret, then restart the codespace; or create `.env` |
 | `429 RESOURCE_EXHAUSTED` that doesn't go away | You hit the per-day quota: wait for the daily reset, switch to Flash-Lite, or enable billing |
-| `404 model not found` | The alias/model id changed: set `COURSE_MODEL` / `COURSE_CHEAP_MODEL` to a current id from the models page |
+| `404 NOT_FOUND … is not found for API version …` | Model names differ by account and change over time. Re-run the setup cell: `check_setup()` lists the models **your key** can use and switches to the best Flash / Flash-Lite automatically. To choose yourself: `from course_utils import available_models; available_models()`, then set `COURSE_MODEL` / `COURSE_CHEAP_MODEL` (e.g. in `.env` or `os.environ` before the setup cell) |
 | A thinking level is rejected | Not every model supports every level: use `thinking_level=None` (model default) or another level |
 | `ModuleNotFoundError: course_utils` / `shopease` | Run `pip install -e .` from the repo root, then restart the kernel |
 | Colab/Kaggle: `ImportError` in the setup cell, or a cell that was "auto-fixed" to import `projects.…` | The clone in `/content` is outdated, or the cell was edited. Run `!rm -rf /content/agentic-ai-course`, then **Runtime → Restart session**, re-open the notebook from GitHub (fresh cell), and run it again. Set `COURSE_BRANCH` to try another branch |

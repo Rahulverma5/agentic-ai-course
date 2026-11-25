@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .cost import tracker
-from .llm import MODEL, get_client, text_of, thinking
+from . import llm
+from .llm import get_client, text_of, thinking
 
 
 @dataclass
@@ -52,7 +53,7 @@ def _run_tool(functions: dict[str, Callable], name: str, args: dict) -> tuple[st
 
 
 def run_agent(contents, tools: list[dict], functions: dict[str, Callable], system: str = "",
-              model: str = MODEL, max_steps: int = 15, max_cost: float = 1.0, max_seconds: float = 300,
+              model: str | None = None, max_steps: int = 15, max_cost: float = 1.0, max_seconds: float = 300,
               thinking_level: str | None = None, verbose: bool = True, client=None,
               on_tool: Callable | None = None, **config) -> AgentResult:
     """Think → act → observe until the model stops calling tools, or a budget is hit.
@@ -63,6 +64,7 @@ def run_agent(contents, tools: list[dict], functions: dict[str, Callable], syste
     from google.genai import types
 
     client = client or get_client()
+    model = model or llm.MODEL  # looked up at call time (check_setup may have switched it)
     if isinstance(contents, str):
         contents = [types.Content(role="user", parts=[types.Part.from_text(text=contents)])]
     cfg = types.GenerateContentConfig(system_instruction=system or None, tools=to_gemini_tools(tools) if tools else None,

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import re
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -28,16 +30,74 @@ def _api_key() -> str | None:
     return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 
-def check_setup() -> dict:
-    """Print whether the Gemini key is available. Run this first in every notebook."""
+_SKIP = ("tts", "image", "embed", "live", "audio", "native", "robotics", "computer", "aqa", "learnlm", "gemma")
+
+
+def _pick(names: list[str], lite: bool) -> str | None:
+    """Best Flash (or Flash-Lite) model in a list: prefer -latest aliases, then stable, then the newest version."""
+    cands = [n for n in names if "flash" in n and ("lite" in n) == lite and not any(s in n for s in _SKIP)]
+
+    def rank(n):
+        m = re.search(r"gemini-(\d+(?:\.\d+)?)", n)
+        return ("latest" in n, not any(t in n for t in ("preview", "exp")), float(m.group(1)) if m else 0.0)
+
+    return max(cands, key=rank) if cands else None
+
+
+def available_models() -> list[str]:
+    """Model ids your key can call with generateContent (one API call)."""
+    out = []
+    for m in get_client().models.list():
+        actions = m.supported_actions or []
+        if not actions or "generateContent" in actions:
+            out.append((m.name or "").removeprefix("models/"))
+    return out
+
+
+def resolve_models(verbose: bool = True) -> tuple[str, str]:
+    """Make sure MODEL / CHEAP_MODEL exist for this key; if not, switch to the best available ones.
+
+    Model names change over time (and differ by account and API version), so the course checks instead
+    of trusting a hard-coded default. Pin your own choice with COURSE_MODEL / COURSE_CHEAP_MODEL.
+    """
+    global MODEL, CHEAP_MODEL
+    try:
+        names = available_models()
+    except Exception as e:  # offline, bad key, ...: keep the configured names
+        if verbose:
+            print(f"(could not list models: {type(e).__name__}: {str(e)[:120]})")
+        return MODEL, CHEAP_MODEL
+    if not names:
+        return MODEL, CHEAP_MODEL
+    for var, lite in (("MODEL", False), ("CHEAP_MODEL", True)):
+        current = globals()[var]
+        if current in names:
+            continue
+        choice = _pick(names, lite) or _pick(names, not lite)
+        if choice:
+            if verbose:
+                print(f"⚠️ {current} isn't available for this key; using {choice} for {var}. "
+                      f"(Set COURSE_{var} to choose another.)")
+            globals()[var] = choice
+            os.environ[f"COURSE_{var}"] = choice
+    for mod in ("course_utils", "shopease.config"):  # keep already-imported modules in sync
+        if sys.modules.get(mod) is not None:
+            sys.modules[mod].MODEL, sys.modules[mod].CHEAP_MODEL = MODEL, CHEAP_MODEL
+    return MODEL, CHEAP_MODEL
+
+
+def check_setup(resolve: bool = True) -> dict:
+    """Check the Gemini key and pick working models. Run this first in every notebook."""
     ok = bool(_api_key())
     print(f"{'✅' if ok else '⬜'} GEMINI_API_KEY")
     if not ok:
         print("\nNo GEMINI_API_KEY found. Get a free key at https://aistudio.google.com/apikey, add it as a\n"
               "Codespaces secret (see SETUP.md) or put GEMINI_API_KEY=... in a .env file at the repo root,\n"
               "then restart the kernel.")
+    elif resolve:
+        resolve_models()
     print(f"\nMODEL={MODEL}  CHEAP_MODEL={CHEAP_MODEL}")
-    return {"GEMINI_API_KEY": ok}
+    return {"GEMINI_API_KEY": ok, "MODEL": MODEL, "CHEAP_MODEL": CHEAP_MODEL}
 
 
 @lru_cache(maxsize=1)
@@ -50,6 +110,7 @@ def get_client():
         raise RuntimeError("GEMINI_API_KEY is not set. See SETUP.md (Codespaces secret or .env file).")
     http = types.HttpOptions(
         base_url=os.getenv("GEMINI_BASE_URL") or None,  # optional: a proxy or a local test stub
+        api_version=os.getenv("GEMINI_API_VERSION", "v1beta"),  # Gemini developer features + -latest aliases
         retry_options=types.HttpRetryOptions(attempts=6, initial_delay=2.0, max_delay=60.0, exp_base=2.0,
                                              jitter=1.0, http_status_codes=RETRY_STATUS_CODES),
     )
@@ -82,13 +143,14 @@ def user(text: str):
     return types.Content(role="user", parts=[types.Part.from_text(text=text)])
 
 
-def ask(prompt: str, model: str = CHEAP_MODEL, system: str | None = None, max_tokens: int | None = None,
+def ask(prompt: str, model: str | None = None, system: str | None = None, max_tokens: int | None = None,
         thinking_level: str | None = None, track: bool = True, **config) -> str:
     """One prompt in, text out. Defaults to the CHEAP model to stay inside free-tier quotas."""
     from google.genai import types
 
     from .cost import tracker
 
+    model = model or CHEAP_MODEL  # looked up at call time (check_setup may have switched it)
     cfg = types.GenerateContentConfig(system_instruction=system, max_output_tokens=max_tokens,
                                       thinking_config=thinking(thinking_level), **config)
     response = get_client().models.generate_content(model=model, contents=prompt, config=cfg)
