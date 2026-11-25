@@ -67,5 +67,6 @@ The course uses `client.models.generate_content` from the official `google-genai
 | `404 model not found` | The alias/model id changed: set `COURSE_MODEL` / `COURSE_CHEAP_MODEL` to a current id from the models page |
 | A thinking level is rejected | Not every model supports every level: use `thinking_level=None` (model default) or another level |
 | `ModuleNotFoundError: course_utils` / `shopease` | Run `pip install -e .` from the repo root, then restart the kernel |
+| Colab/Kaggle: `ImportError` in the setup cell, or a cell that was "auto-fixed" to import `projects.…` | The clone in `/content` is outdated, or the cell was edited. Run `!rm -rf /content/agentic-ai-course`, then **Runtime → Restart session**, re-open the notebook from GitHub (fresh cell), and run it again. Set `COURSE_BRANCH` to try another branch |
 | `ShopEase data not found` | `python -m shopease.data` |
 | Day 6 model download is slow | First run downloads ~70–130 MB of small ONNX models; later runs use the cache |
